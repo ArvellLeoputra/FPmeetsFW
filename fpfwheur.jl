@@ -60,18 +60,29 @@ end
 
 optimizer = SCIP.Optimizer()
 
-heuristic_storage = Dict{Any, Ptr{SCIP.SCIP_HEUR}}()
+model = direct_model(optimizer)
+set_attribute(model, "presolving/maxrounds", 0)
 
+@variable(model, x[1:3] >= 0)
+@variable(model, 3 >= y >= 2, Int)
+@objective(model, Max, x[1] + 2 * x[2] + 3 * x[3] + y)
+@constraint(model, -x[1] + x[2] + x[3] + 10 * y <= 20)
+@constraint(model, x[1] - 3 * x[2] + x[3] <= 30)
+@constraint(model, x[2] - 3.5 * y == 0)
+@constraint(model, x[1] <= 40)
+@constraint(model, 2 <= y <= 3)
+
+scip = JuMP.unsafe_backend(model).inner
 SCIP.include_heuristic(
     optimizer, 
-    FPFWHeuristic(100); 
-    name="FPFWHeuristic",
+    FPFWHeuristic(100);
+    name="FPFWHeuristic", 
     description="Frank–Wolfe Feasibility Pump heuristic", 
     priority=100000, 
     frequency=0, 
     timing_mask=SCIP.SCIP_HEURTIMING_DURINGLPLOOP
 )
 
-scip = optimizer.inner
-SCIP.@SCIP_CALL(SCIP.SCIPreadProb(scip, "neos5.mps", C_NULL))
-SCIP.@SCIP_CALL(SCIP.SCIPsolve(scip))
+optimize!(model)
+assert_is_solved_and_feasible(model)
+solution_summary(model)
