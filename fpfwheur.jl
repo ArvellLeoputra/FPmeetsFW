@@ -1,88 +1,183 @@
 using SCIP
 using JuMP
+# using Printf
 using FrankWolfe
 
 mutable struct FPFWHeuristic <: SCIP.Heuristic
-    max_iter::Int
+    called::Int64
+end
+
+struct MyLMO <: FrankWolfe.LinearMinimizationOracle
+    model::Model
+    x::Vector{VariableRef}
+end
+
+function MyLMO(A, l, u)
+    m, n = size(A)
+
+    model = Model(SCIP.Optimizer)
+
+    set_silent(model)
+
+    # Variables with bounds
+    @variable(model, l[j] <= x[j=1:n] <= u[j])
+
+    # Linear equalities A*x = 0
+    for i in 1:m
+        @constraint(model, sum(A[i,j] * x[j] for j in 1:n) == 0)
+    end
+
+    # Dummy objective (will overwrite later)
+    @objective(model, Min, 0)
+
+    return MyLMO(model, x)
+end
+
+function FrankWolfe.compute_extreme_point(lmo::MyLMO, direction; v=nothing, kwargs...)
+    model = lmo.model
+    x = lmo.x
+
+    # Replace objective without rebuilding model
+    @objective(model, Min, sum(direction[j] * x[j] for j in eachindex(x)))
+
+    optimize!(model)
+    println("LMO Called solution status: ", termination_status(model))
+    return value.(x)
 end
 
 function SCIP.find_primal_solution(
     scip::Ptr{SCIP.SCIP_},
     heur::FPFWHeuristic,
     heurtiming::SCIP.SCIP_HEURTIMING,
-    nodeinfeasible::SCIP.Bool,
+    nodeinfeasible::Bool,
     heur_ptr::Ptr{SCIP.SCIP_HEUR},
 )::Tuple{SCIP.SCIP_RETCODE, SCIP.SCIP_RESULT}
 
-    @info("FWFP heuristic called")
     @assert SCIP.SCIPhasCurrentNodeLP(scip) == SCIP.TRUE  # always true, since we set timing to DURINGLPLOOP
-    result = SCIP.SCIP_DIDNOTRUN
+    result = SCIP.SCIP_DIDNOTFIND
 
-    n_vars = SCIP.SCIPgetNLPCols(scip)
-    n_rows = SCIP.SCIPgetNLPRows(scip)
-    @info "There are $n_vars variables and $n_rows rows in the current LP."
-
-    # For each column, there is a single SCIP_COL object, while for each row there is a single SCIP_ROW object.
-    # First, we get all the SCIP_ROW objects
-    # We have an object called SCIP_ROW, this lies in the heap
-    # So to keep track of the object we have a pointer to the object SCIP_ROW*
-    # Now we an array of such pointers, one for each row so we have SCIP_ROW** (pointer to pointer)
-    ptr_rows = SCIP.SCIPgetLPRows(scip) # SCIP_ROW** // an array of pointers
-    row_pointers = unsafe_wrap(Vector{Ptr{SCIP.SCIP_ROW}}, ptr_rows, n_rows)
-    # row_pointers is an array of pointers to SCIP_ROW objects
-
-    # gets all constraints printed out
-    for (i, row_ptr) in enumerate(row_pointers)
-        # gets the LHS and RHS of the row, i.e., the constraint bounds
-        rhs = SCIP.SCIProwGetRhs(row_ptr)
-        lhs = SCIP.SCIProwGetLhs(row_ptr)
-
-        shift = SCIP.SCIProwGetConstant(row_ptr)
-        nnonz = SCIP.SCIProwGetNNonz(row_ptr)
-
-        non_zero_cols = SCIP.SCIProwGetCols(row_ptr) # SCIP_COL**
-        non_zero_cols_ptrs = unsafe_wrap(Vector{Ptr{SCIP.SCIP_COL}}, non_zero_cols, nnonz)
-        non_zero_vals = SCIP.SCIProwGetVals(row_ptr) # double*
-        non_zero_vec = unsafe_wrap(Vector{SCIP.SCIP_Real}, non_zero_vals, nnonz)
-
-        print("$lhs <=")
-        for j in 1:nnonz
-            var = SCIP.SCIPcolGetVar(non_zero_cols_ptrs[j])
-            name = unsafe_string(SCIP.SCIPvarGetName(var))
-            coeff = non_zero_vec[j]
-            print(" $coeff*$name ")
-        end
-        print(" + $shift <=  $rhs\n")
+    heur.called += 1
+    if heur.called > 1
+        return (SCIP.SCIP_OKAY, SCIP.SCIP_DIDNOTRUN)
     end
 
-    return (SCIP.SCIP_OKAY, SCIP.SCIP_DIDNOTFIND)
+    @info("FPFW heuristic called")
+    nvars = SCIP.SCIPgetNLPCols(scip)
+    nrows = SCIP.SCIPgetNLPRows(scip)
+    @info "There are $nvars variables and $nrows rows in the current LP."
+    constraint_matrix = zeros(SCIP.SCIP_Real, nrows, nvars + nrows)
+
+    ptr_cols = SCIP.SCIPgetLPCols(scip) # SCIP_COL**  // an array of pointers
+    lp_cols = unsafe_wrap(Vector{Ptr{SCIP.SCIP_COL}}, ptr_cols, nvars)
+
+    ptr_rows = SCIP.SCIPgetLPRows(scip) # SCIP_ROW**  // an array of pointers
+    lp_rows = unsafe_wrap(Vector{Ptr{SCIP.SCIP_ROW}}, ptr_rows, nrows)
+
+    # Get the constraint matrix
+    for i in 1:nrows
+        row = lp_rows[i]
+        nnonz = SCIP.SCIProwGetNNonz(row)
+        nonzero_cols = unsafe_wrap(
+            Vector{Ptr{SCIP.SCIP_COL}}, SCIP.SCIProwGetCols(row), nnonz
+            )
+        nonzero_vals = unsafe_wrap(
+            Vector{SCIP.SCIP_Real}, SCIP.SCIProwGetVals(row), nnonz
+        )
+
+        for j in 1:nnonz
+            for k in 1:nvars
+                if lp_cols[k] == nonzero_cols[j]
+                    constraint_matrix[i, k] = nonzero_vals[j]
+                end
+            end
+        end
+
+        constraint_matrix[i, nvars + i] = 1  # Slack Variable
+    end
+
+    binary = []
+    solution = zeros(SCIP.SCIP_Real, nvars + nrows)
+
+    for i in 1:nrows
+        row = lp_rows[i]
+        if SCIP.SCIProwGetConstant(row) != 0
+            @error "Row with nonzero constant"
+        end
+    end
+
+    for i in 1:nvars
+        col = lp_cols[i]
+        var = SCIP.SCIPcolGetVar(col)
+        if SCIP.SCIPvarIsBinary(var) == SCIP.TRUE
+            push!(binary, i)
+        end
+        solution[i] = SCIP.SCIPcolGetPrimsol(col)
+    end
+
+    upper_bounds = zeros(SCIP.SCIP_Real, nvars + nrows)
+    lower_bounds = zeros(SCIP.SCIP_Real, nvars + nrows)
+
+    for i in 1:nvars
+        col = lp_cols[i]
+        upper_bounds[i] = SCIP.SCIPcolGetUb(col)
+        lower_bounds[i] = SCIP.SCIPcolGetLb(col)
+    end
+
+    for i in 1:nrows
+        upper_bounds[nvars + i] = -SCIP.SCIProwGetLhs(lp_rows[i])
+        lower_bounds[nvars + i] = -SCIP.SCIProwGetRhs(lp_rows[i])
+        # SCIP.SCIPprintRow(scip, lp_rows[i], C_NULL)
+    end
+
+    function f(p)
+        sum = 0.0
+        for i in 1:length(p)
+            if i in binary
+                sum += min(p[i], 1.0 - p[i])
+            end
+        end
+        return sum
+    end
+
+    function g(storage, p)
+        storage .= 0.0
+        for i in 1:length(p)
+            if i in binary
+                if p[i] < 0.5
+                    storage[i] = 1.0
+                else
+                    storage[i] = -1.0
+                end
+            end
+        end
+        return storage
+    end
+
+    gradient_storage = zeros(SCIP.SCIP_Real, nvars + nrows)
+    lmo = MyLMO(constraint_matrix, lower_bounds, upper_bounds)
+    p_opt, _ = frank_wolfe(
+        f,
+        g,
+        lmo,
+        solution,
+        verbose=true,
+        line_search = FrankWolfe.FixedStep(1.0)
+    )
+    return (SCIP.SCIP_OKAY, result)
 end
 
-optimizer = SCIP.Optimizer()
-
-model = direct_model(optimizer)
-set_attribute(model, "presolving/maxrounds", 0)
-
-@variable(model, x[1:3] >= 0)
-@variable(model, 3 >= y >= 2, Int)
-@objective(model, Max, x[1] + 2 * x[2] + 3 * x[3] + y)
-@constraint(model, -x[1] + x[2] + x[3] + 10 * y <= 20)
-@constraint(model, x[1] - 3 * x[2] + x[3] <= 30)
-@constraint(model, x[2] - 3.5 * y == 0)
-@constraint(model, x[1] <= 40)
-@constraint(model, 2 <= y <= 3)
-
-scip = JuMP.unsafe_backend(model).inner
+model = direct_model(SCIP.Optimizer())
+backend =  JuMP.unsafe_backend(model)
+scip = backend.inner
+heur = FPFWHeuristic(0)
 SCIP.include_heuristic(
-    optimizer, 
-    FPFWHeuristic(100);
+    backend, 
+    heur,
     name="FPFWHeuristic", 
-    description="Frank–Wolfe Feasibility Pump heuristic", 
-    priority=100000, 
-    frequency=0, 
+    priority=9999, 
     timing_mask=SCIP.SCIP_HEURTIMING_DURINGLPLOOP
 )
 
-optimize!(model)
-assert_is_solved_and_feasible(model)
-solution_summary(model)
+SCIP.SCIPreadProb(scip, "MPSFILE", C_NULL)  # Insert MPS file name here
+SCIP.set_parameter(scip, "limits/nodes", 1)
+SCIP.SCIPsolve(scip)
