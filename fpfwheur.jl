@@ -1,47 +1,15 @@
 using SCIP
 using JuMP
-# using Printf
 using FrankWolfe
+using GLPK
+import MathOptInterface
+
+
+const MOI = MathOptInterface
 
 mutable struct FPFWHeuristic <: SCIP.Heuristic
     called::Int64
-end
-
-struct MyLMO <: FrankWolfe.LinearMinimizationOracle
-    model::Model
-    x::Vector{VariableRef}
-end
-
-function MyLMO(A, b, l, u)
-    m, n = size(A)
-
-    model = Model(SCIP.Optimizer) # create inner model
-
-    set_silent(model) # turn off output for the inner model
-
-    @variable(model, l[j] <= x[j=1:n] <= u[j])
-
-    # Linear equalities Ax >= b
-    for i in 1:m
-        @constraint(model, sum(A[i,j] * x[j] for j in 1:n) >= b[i])
-    end
-
-    @objective(model, Min, 0) # dummy objective, since JuMP requires one
-    # The real objective will be set in compute_extreme_point
-
-    return MyLMO(model, x)
-end
-
-function FrankWolfe.compute_extreme_point(lmo::MyLMO, direction; v=nothing, kwargs...)
-    model = lmo.model
-    x = lmo.x
-
-    # Replace objective without rebuilding model
-    @objective(model, Min, sum(direction[j] * x[j] for j in eachindex(x)))
-
-    optimize!(model)
-    println("LMO Called solution status: ", termination_status(model))
-    return value.(x)
+    lmo::Union{Nothing, FrankWolfe.MathOptLMO}
 end
 
 function SCIP.find_primal_solution(
@@ -70,46 +38,6 @@ function SCIP.find_primal_solution(
     ptr_cols = SCIP.SCIPgetLPCols(scip) # SCIP_COL**  // an array of pointers
     lp_cols = unsafe_wrap(Vector{Ptr{SCIP.SCIP_COL}}, ptr_cols, nvars)
 
-    ptr_rows = SCIP.SCIPgetLPRows(scip) # SCIP_ROW**  // an array of pointers
-    lp_rows = unsafe_wrap(Vector{Ptr{SCIP.SCIP_ROW}}, ptr_rows, nrows)
-
-    cols_dict = Dict(lp_cols[k] => k for k in 1:nvars)  # Map each column to its index
-
-    A = zeros(SCIP.SCIP_Real, nrows, nvars)
-    b = zeros(SCIP.SCIP_Real, nrows)
-
-    # Get the constraint matrix
-    for i in 1:nrows
-        row = lp_rows[i]
-
-        constant = SCIP.SCIProwGetConstant(row)
-        
-        nnonz = SCIP.SCIProwGetNNonz(row)
-        nonzero_cols = unsafe_wrap(Vector{Ptr{SCIP.SCIP_COL}}, SCIP.SCIProwGetCols(row), nnonz)
-        nonzero_vals = unsafe_wrap(Vector{SCIP.SCIP_Real}, SCIP.SCIProwGetVals(row), nnonz)
-
-        tmp_row = zeros(SCIP.SCIP_Real, nvars)
-        for j in 1:nnonz
-            k = cols_dict[nonzero_cols[j]]
-            tmp_row[k] = nonzero_vals[j]
-        end
-
-        lhs = SCIP.SCIProwGetLhs(row)
-        rhs = SCIP.SCIProwGetRhs(row)
-
-        if lhs != -SCIP.SCIPinfinity(scip)
-            A[i, :] = tmp_row
-            b[i] = lhs - constant
-
-        elseif rhs != SCIP.SCIPinfinity(scip)
-            A[i, :] = -tmp_row
-            b[i] = constant - rhs
-
-        else
-            error("Row $i has both LHS and RHS infinite — cannot normalize to ≥ form")
-        end
-    end
-
     lb = zeros(SCIP.SCIP_Real, nvars)
     ub = zeros(SCIP.SCIP_Real, nvars)
     binary = []
@@ -119,9 +47,6 @@ function SCIP.find_primal_solution(
     for j in 1:nvars
         col = lp_cols[j]
         var = SCIP.SCIPcolGetVar(col)
-
-        ub[j] = SCIP.SCIPcolGetUb(col)
-        lb[j] = SCIP.SCIPcolGetLb(col)
 
         if SCIP.SCIPvarIsBinary(var) == SCIP.TRUE
             push!(binary, j)
@@ -133,23 +58,19 @@ function SCIP.find_primal_solution(
     # Penalty function with Manhattan norm
     function f(p)
         sum = 0.0
-        for i in 1:length(p)
-            if i in binary
-                sum += min(p[i], 1.0 - p[i])
-            end
+        for i in binary
+            sum += min(p[i], 1.0 - p[i])
         end
         return sum
     end
 
     function g(storage, p)
         storage .= 0.0
-        for i in 1:length(p)
-            if i in binary
-                if p[i] < 0.5
-                    storage[i] = 1.0
-                else
-                    storage[i] = -1.0
-                end
+        for i in binary
+            if p[i] < 0.5
+                storage[i] = 1.0
+            else
+                storage[i] = -1.0
             end
         end
         return storage
@@ -158,30 +79,26 @@ function SCIP.find_primal_solution(
     # Penalty function with Euclidean norm
     function f2(p)
         sum = 0.0
-        for i in 1:length(p)
-            if i in binary
-                sum += min(p[i]^2, (1.0 - p[i])^2)
-            end
+        for i in binary
+            sum += min(p[i]^2, (1.0 - p[i])^2)
         end
         return sum
     end
 
     function g2(storage, p)
         storage .= 0.0
-        for i in 1:length(p)
-            if i in binary
-                if p[i] < 0.5
-                    storage[i] = 2.0 * p[i]
-                else
-                    storage[i] = -2.0 * (1.0 - p[i])
-                end
+        for i in binary
+            if p[i] < 0.5
+                storage[i] = 2.0 * p[i]
+            else
+                storage[i] = -2.0 * (1.0 - p[i])
             end
         end
         return storage
     end
-
-    lmo = MyLMO(A, b, lb, ub)
     
+    lmo = heur.lmo
+
     p_opt, _ = frank_wolfe(
         f2,
         g2,
@@ -196,7 +113,67 @@ end
 model = direct_model(SCIP.Optimizer())
 backend =  JuMP.unsafe_backend(model)
 scip = backend.inner
-heur = FPFWHeuristic(0)
+
+SCIP.SCIPreadProb(scip, "filename.mps", C_NULL)  # Insert MPS file name here
+
+# Build MOI model from SCIP model
+nvars = SCIP.SCIPgetNVars(scip)
+all_vars = unsafe_wrap(Vector{Ptr{SCIP.SCIP_VAR}}, SCIP.SCIPgetVars(scip), nvars)
+
+moi_model = MOI.Utilities.Model{Float64}()
+x = add_variables(moi_model, nvars)
+
+# Add bounds
+for j in 1:nvars
+    var = all_vars[j]
+    lb = SCIP.SCIPvarGetLbOriginal(var)
+    ub = SCIP.SCIPvarGetUbOriginal(var)
+    
+    if lb > -SCIP.SCIPinfinity(scip)
+        add_constraint(moi_model, x[j], GreaterThan(lb))
+    end
+    if ub < SCIP.SCIPinfinity(scip)
+        add_constraint(moi_model, x[j], LessThan(ub))
+    end
+end
+
+# Add original constraints
+nconss = SCIP.SCIPgetNOrigConss(scip)
+orig_conss = unsafe_wrap(Vector{Ptr{SCIP.SCIP_CONS}}, SCIP.SCIPgetOrigConss(scip), nconss)
+
+for i in 1:nconss
+    cons = orig_conss[i]
+    conshdlr = SCIP.SCIPconsGetHdlr(cons)
+    constype = unsafe_string(SCIP.SCIPconshdlrGetName(conshdlr))
+    
+    if constype == "linear"
+        nvars_in_cons = SCIP.SCIPgetNVarsLinear(scip, cons)
+        cons_vars = unsafe_wrap(Vector{Ptr{SCIP.SCIP_VAR}}, SCIP.SCIPgetVarsLinear(scip, cons), nvars_in_cons)
+        cons_vals = unsafe_wrap(Vector{SCIP.SCIP_Real}, SCIP.SCIPgetValsLinear(scip, cons), nvars_in_cons)
+        
+        # Map SCIP variables to MOI variable indices
+        var_to_idx = Dict(all_vars[k] => k for k in 1:nvars)
+        
+        terms = [ScalarAffineTerm(cons_vals[j], x[var_to_idx[cons_vars[j]]]) for j in 1:nvars_in_cons]
+        aff = ScalarAffineFunction(terms, 0.0)
+        
+        lhs = SCIP.SCIPgetLhsLinear(scip, cons)
+        rhs = SCIP.SCIPgetRhsLinear(scip, cons)
+        
+        if lhs > -SCIP.SCIPinfinity(scip)
+            add_constraint(moi_model, aff, GreaterThan(lhs))
+        end
+        if rhs < SCIP.SCIPinfinity(scip)
+            add_constraint(moi_model, aff, LessThan(rhs))
+        end
+    end
+end
+
+opt_model = GLPK.Optimizer()
+copy_to(opt_model, moi_model)
+lmo = FrankWolfe.MathOptLMO(opt_model)
+
+heur = FPFWHeuristic(0, lmo)
 SCIP.include_heuristic(
     backend, 
     heur,
@@ -205,6 +182,5 @@ SCIP.include_heuristic(
     timing_mask=SCIP.SCIP_HEURTIMING_DURINGLPLOOP
 )
 
-SCIP.SCIPreadProb(scip, "filename.mps", C_NULL)  # Insert MPS file name here
 SCIP.set_parameter(scip, "limits/nodes", 1)
 SCIP.SCIPsolve(scip)
