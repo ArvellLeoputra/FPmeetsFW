@@ -264,7 +264,7 @@ function SCIP.find_primal_solution(
 
     max_iterations = 100
     x = copy(current_solution)
-    println("LP solution: ", current_solution)
+    # println("LP solution: ", current_solution)
     
     for iter in 1:max_iterations
         println("\n--- Iteration $iter ---")
@@ -288,7 +288,7 @@ function SCIP.find_primal_solution(
             line_search = FrankWolfe.Adaptive()
         )
 
-        println("Current FW solution: ", x_fw)
+        # println("Current FW solution: ", x_fw)
 
         # Check integrality
         is_integral = check_integrality(x_fw, binary)
@@ -329,8 +329,6 @@ function SCIP.find_primal_solution(
             ret = SCIP.SCIPtrySol(scip, sol, SCIP.FALSE, SCIP.FALSE, SCIP.TRUE, SCIP.TRUE, SCIP.TRUE, stored)
             
             if stored[] == SCIP.TRUE
-                obj = SCIP.SCIPgetSolOrigObj(scip, sol)
-                println("Objective value of accepted solution: $obj")
                 println("Solution accepted by SCIP!")
                 result = SCIP.SCIP_FOUNDSOL
             else
@@ -352,21 +350,3 @@ function SCIP.find_primal_solution(
 
     return (SCIP.SCIP_OKAY, result)
 end
-
-model = direct_model(SCIP.Optimizer())
-backend =  JuMP.unsafe_backend(model)
-scip = backend.inner
-
-SCIP.SCIPreadProb(scip, "filename.mps", C_NULL)  # Insert MPS file name here
-
-heur = FPFWHeuristic(0, nothing)
-SCIP.include_heuristic(
-    backend, 
-    heur,
-    name="FPFWHeuristic", 
-    priority=9999, 
-    timing_mask=SCIP.SCIP_HEURTIMING_DURINGLPLOOP
-)
-
-SCIP.set_parameter(scip, "limits/nodes", 1)
-SCIP.SCIPsolve(scip)
