@@ -1,5 +1,4 @@
-using JuMP
-using SCIP
+include("dependencies.jl")
 
 function set_param(model::JuMP.Model, param::String, value)
     JuMP.set_attribute(model, param, value)
@@ -149,14 +148,17 @@ end
 
 function minimal_setup()
     model = create_scip_model()
+
     disable_all_heuristics!(model)
     disable_separators!(model)
     disable_cuts!(model)
     disable_presolving!(model)
     disable_root_node_propagation!(model)
     disable_strong_branching_lookahead!(model)
+
     set_verbosity!(model, 5)
     set_limits!(model, time_limit=3600, node_limit=2)
     set_param(model, "separating/maxroundsroot", 1)
+    
     return model
 end
