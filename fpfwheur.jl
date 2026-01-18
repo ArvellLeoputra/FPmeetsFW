@@ -1,7 +1,3 @@
-include("dependencies.jl")
-include("helper.jl")
-include("lmo_builder.jl")
-
 # Main FPFW Heuristic Implementation
 function SCIP.find_primal_solution(
     scip::Ptr{SCIP.SCIP_},
@@ -19,6 +15,9 @@ function SCIP.find_primal_solution(
         return (SCIP.SCIP_OKAY, SCIP.SCIP_DIDNOTRUN)
     end
 
+    stats = FPFWStats()
+    total_start_time = time()
+
     println("\n" * "="^80)
     println("FPFW Heuristic Called (Attempt #$(heur.called))")
     println("="^80)
@@ -29,10 +28,11 @@ function SCIP.find_primal_solution(
 
     # Build LMO from current LP
     if heur.lmo === nothing
+        lmo_start = time()
         println("Building LMO...")
-        println(typeof(scip))
         heur.lmo = build_lmo_from_scip_lp(scip, nvars, nrows)
-        println("LMO built successfully")
+        lmo_time = time() - lmo_start
+        println("LMO built successfully in $(round(lmo_time, digits=3)) seconds.")
     end
 
     lmo = heur.lmo
@@ -56,6 +56,13 @@ function SCIP.find_primal_solution(
     end
 
     println("Binary variables: $(length(binary)) out of $nvars")
+
+    lp_obj = 0.0
+    for j in 1:nvars
+        lp_obj += current_solution[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lp_cols[j]))
+    end
+
+    println("Initial LP objective: $(round(lp_obj, digits=4))")
 
     # Penalty function with Manhattan norm
     function f(p)
@@ -94,50 +101,92 @@ function SCIP.find_primal_solution(
         end
         return storage
     end
-
+    
     # Main Feasibility Pump with Frank-Wolfe Loop
     x = copy(current_solution)  # Initial LP feasible solution
     prev_x = copy(x)
+    cycle = false
 
     # println("LP solution: ", current_solution)
     
+    # Track best solution found
+    best_solution = nothing
+    best_objective = Inf
+
     for iter in 1:DEF_FP_MAX_ITER
-        println("\n--- Iteration $iter ---")
+        stats.fp_iterations = iter
+
+        # Check time limit (5 minutes)
+        elapsed = time() - total_start_time
+        if elapsed > DEF_TIME_LIMIT
+            println("Time limit reached ($(round(elapsed, digits=2))s > $(DEF_TIME_LIMIT)s)")
+            break
+        end
 
         # Step 1: Rounding LP feasible solution
         x_round = copy(x)
         for i in binary
             x_round[i] = round(x[i])
         end
+
+        fw_traj = Vector{NTuple{5,Float64}}()
+        fw_callback = FrankWolfe.make_print_callback(
+            FrankWolfe.make_trajectory_callback(nothing, fw_traj),
+            10,
+            ("iter", "primal", "dual", "gap", "time"),
+            "%6i %12e %12e %12e %12e\n",
+            FrankWolfe.callback_state
+        )
+
+        stats.fw_calls += 1
         
         # Step 2: Euclidean Projection using Frank-Wolfe
-        x_new, _ = frank_wolfe(
-            x -> f_proj(x, x_round),
-            (g, x) -> g_proj(g, x, x_round),
+        @time x_new, _ = frank_wolfe(
+            y -> f_proj(y, x_round),
+            (g, y) -> g_proj(g, y, x_round),
             lmo,
             x,
             max_iteration = DEF_FW_MAX_ITER,
-            verbose=false,
-            line_search = FrankWolfe.Adaptive()
+            verbose = false,
+            line_search = FrankWolfe.Adaptive(),
+            epsilon = 1e-7,
+            callback = fw_callback
         )
 
-        # Step 3: Check feasibility and integrality
-        # Check integrality
-        is_integral = check_integrality(x_new, binary)
-        println("Integrality check: $is_integral")
+        fw_iters = length(fw_traj)
+        stats.fw_iterations += fw_iters
 
-        # Remove later -- just for debugging
+        if fw_iters > 0
+            stats.fw_time += fw_traj[end][5] - fw_traj[1][5]
+        end
+
+        # Step 3: Check feasibility and integrality and calculate current objective value
+        is_integral = check_integrality(x_new, binary)
         is_feasible = check_feasibility(scip, x_new)
-        println("Feasibility check: $is_feasible")
+        distance = sqrt(sum((x_new[i] - prev_x[i])^2 for i in binary))
+
+        obj_val = 0.0
+        for j in 1:nvars
+            obj_val += x_new[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lp_cols[j]))
+        end
 
         # Just for debugging
         if !is_feasible
             println("FrankWolfe return infeasible solution!")
+            break
         end
 
         if is_integral
-            println("Found feasible integer solution after $iter iterations")
-            
+            println("Found feasible integer solution at iteration $iter with objective $obj_val")
+            stats.solution_found = true
+            stats.final_objective = obj_val
+
+            # Track best solution (for minimization problems)
+            if obj_val < best_objective
+                best_objective = obj_val
+                best_solution = copy(x_new)
+            end
+
             # Submit solution to SCIP
             if submit_solution_to_scip(scip, heur_ptr, lp_cols, x_new, nvars)
                 result = SCIP.SCIP_FOUNDSOL
@@ -148,23 +197,37 @@ function SCIP.find_primal_solution(
         else
             # Short cycle detection
             # TODO: Implement cycle detection, maybe with a cache of previous rounded solutions
-            distance = sqrt(sum((x_new[i] - x[i])^2 for i in binary))
-            println("Distance moved: $(round(distance, digits=6))")
-
             if distance < DEF_TOLERANCE
                 println("Converged to fixed point without finding integer solution")
+                cycle = true
                 break
             end
 
             # If not feasible, continue with the non-rounded solution for next FW iteration
-            println("Solution not feasible, continuing FW...")
+            prev_x .= copy(x)
             x .= x_new
         end
     end
 
-    if result == SCIP.SCIP_DIDNOTFIND
-        println("\nFailed to find feasible solution after $DEF_FP_MAX_ITER iterations")
+    # Print final summary
+    total_time = time() - total_start_time
+    println("\n" * "="^80)
+    println("FPFW HEURISTIC SUMMARY")
+    println("="^80)
+    println("Total time:        $(round(total_time, digits=2)) seconds")
+    println("FP iterations:     $(stats.fp_iterations)")
+    println("FW calls:          $(stats.fw_calls)")
+    println("FW iterations:     $(stats.fw_iterations)")
+    println("Solution found:    $(stats.solution_found)")
+
+    if best_solution !== nothing
+        println("\nBEST SOLUTION FOUND:")
+        println("  Objective value: $best_objective")
+        println("  Solution vector (first 20 vars): $(best_solution[1:min(20, length(best_solution))])")
+    else
+        println("\nNo feasible integer solution found.")
     end
+    println("="^80 * "\n")
 
     return (SCIP.SCIP_OKAY, result)
 end

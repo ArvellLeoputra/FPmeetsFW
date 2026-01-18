@@ -29,19 +29,19 @@ function build_lmo_from_scip_lp(scip::Ptr{SCIP.SCIP_}, nvars, nrows)
 
     # Add constraints
     col_to_idx = Dict(lp_cols[k] => k for k in 1:nvars)
-    
+
     for i in 1:nrows
         row = lp_rows[i]
         nnonz = SCIP.SCIProwGetNNonz(row)
         nonzero_cols = unsafe_wrap(Vector{Ptr{SCIP.SCIP_COL}}, SCIP.SCIProwGetCols(row), nnonz)
         nonzero_vals = unsafe_wrap(Vector{SCIP.SCIP_Real}, SCIP.SCIProwGetVals(row), nnonz)
-        
+
         terms = [ScalarAffineTerm(nonzero_vals[k], x[col_to_idx[nonzero_cols[k]]]) for k in 1:nnonz]
         aff = ScalarAffineFunction(terms, 0.0)
-        
+
         lhs = SCIP.SCIProwGetLhs(row)
         rhs = SCIP.SCIProwGetRhs(row)
-        
+
         if lhs > -SCIP.SCIPinfinity(scip)
             add_constraint(moi_model, aff, GreaterThan(lhs))
         end
