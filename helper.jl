@@ -1,5 +1,3 @@
-include("dependencies.jl")
-
 # Helper function to check constraint feasibility
 function check_feasibility(
     scip::Ptr{SCIP.SCIP_}, 
@@ -30,6 +28,8 @@ function check_feasibility(
     end
     
     # Constraint check using rows
+    col_to_idx = Dict(lp_cols[k] => k for k in 1:ncols)
+
     for i in 1:nrows
         row = lp_rows[i]
 
@@ -37,8 +37,6 @@ function check_feasibility(
         nonz_cols = unsafe_wrap(Vector{Ptr{SCIP.SCIP_COL}}, SCIP.SCIProwGetCols(row), nnonz)
         nonz_vals = unsafe_wrap(Vector{SCIP.SCIP_Real}, SCIP.SCIProwGetVals(row), nnonz)
 
-        col_to_idx = Dict(lp_cols[k] => k for k in 1:ncols)
-        
         activity = 0.0
         
         for k in 1:nnonz

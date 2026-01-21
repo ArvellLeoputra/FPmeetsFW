@@ -18,6 +18,11 @@ function SCIP.find_primal_solution(
     stats = FPFWStats()
     total_start_time = time()
 
+    # Set random seed for reproducibility
+    if DEF_RANDOM_SEED !== nothing
+        Random.seed!(DEF_RANDOM_SEED)
+    end
+
     println("\n" * "="^80)
     println("FPFW Heuristic Called (Attempt #$(heur.called))")
     println("="^80)
@@ -63,60 +68,77 @@ function SCIP.find_primal_solution(
     end
 
     println("Initial LP objective: $(round(lp_obj, digits=4))")
+    println("Using projection norm: $(heur.projection_norm)")
 
-    # Penalty function with Manhattan norm
-    function f(p)
-        sum = 0.0
-        for i in binary
-            sum += min(p[i], 1.0 - p[i])
-        end
-        return sum
-    end
-
-    function g(storage, p)
-        storage .= 0.0
-        for i in binary
-            if p[i] < 0.5
-                storage[i] = 1.0
-            else
-                storage[i] = -1.0
+    if heur.projection_norm == :manhattan
+        f_proj = (x, x_round) -> begin
+            sum = 0.0
+            for i in binary
+                sum += abs(x[i] - x_round[i])
             end
+            return sum
         end
-        return storage
+
+        g_proj = (storage, x, x_round) -> begin
+            storage .= 0.0
+            for i in binary
+                d = x[i] - x_round[i]
+                if d > 0
+                    storage[i] = 1.0
+                elseif d < 0
+                    storage[i] = -1.0
+                else
+                    storage[i] = 0.0
+                end
+            end
+            return storage
+        end
+
+    elseif heur.projection_norm == :euclidean
+        f_proj = (x, x_round) -> begin
+            sum = 0.0
+            for i in binary
+                d = x[i] - x_round[i]
+                sum += d * d
+            end
+            return 0.5 * sum
+        end
+
+        g_proj = (storage, x, x_round) -> begin
+            storage .= 0.0
+            for i in binary
+                storage[i] = x[i] - x_round[i]
+            end
+            return storage
+        end
+
+    else
+        error("Unknown projection norm: $(heur.projection_norm)")
     end
 
-    function f_proj(x, x_round)
-        sum = 0.0
-        for i in binary
-            d = x[i] - x_round[i]
-            sum += d * d
-        end
-        return 0.5 * sum
+    # Hash function for cycle detection (only hashes binary variable values)
+    function hash_rounded(x_round, binary_indices)
+        return hash(tuple((x_round[i] for i in binary_indices)...))
     end
-    
-    function g_proj(storage, x, x_round)
-        storage .= 0.0
-        for i in binary
-            storage[i] = x[i] - x_round[i]
-        end
-        return storage
-    end
-    
+
     # Main Feasibility Pump with Frank-Wolfe Loop
     x = copy(current_solution)  # Initial LP feasible solution
-    prev_x = copy(x)
-    cycle = false
+    prev_x = copy(x)  # To calculate distance moved
+    last_feasible_x = copy(current_solution)  # Always keep a feasible point for restarts
 
-    # println("LP solution: ", current_solution)
-    
-    # Track best solution found
-    best_solution = nothing
-    best_objective = Inf
+    # Cycle detection: store hashes of all visited rounded solutions
+    rounded_cache = Set{UInt64}()
+    restart_count = 0
+
+    # Store first feasible solution found
+    found_solution = nothing
+    found_objective = Inf
 
     for iter in 1:DEF_FP_MAX_ITER
+        println("\n--- FPFW Iteration $iter ---")
         stats.fp_iterations = iter
 
-        # Check time limit (5 minutes)
+        # Check time limit
         elapsed = time() - total_start_time
         if elapsed > DEF_TIME_LIMIT
             println("Time limit reached ($(round(elapsed, digits=2))s > $(DEF_TIME_LIMIT)s)")
@@ -129,26 +151,50 @@ function SCIP.find_primal_solution(
             x_round[i] = round(x[i])
         end
 
+        # Cycle detection: check if we've visited this rounded solution before
+        h = hash_rounded(x_round, binary)
+        if h in rounded_cache
+            restart_count += 1
+            println("Cycle detected at iteration $iter (restart #$restart_count)")
+
+            if restart_count >= DEF_MAX_RESTARTS
+                println("Maximum restarts ($DEF_MAX_RESTARTS) reached, stopping.")
+                break
+            end
+
+            # Perturb the rounding target directly (flip some binary values)
+            for i in binary
+                if rand() < DEF_PERTURB_FRACTION
+                    x_round[i] = 1.0 - x_round[i]  # Flip 0-1
+                end
+            end
+            # Reset x to last known feasible point
+            x .= last_feasible_x
+            println("Perturbed rounding target, restarting from feasible point...")
+            # Don't skip - proceed with FW projection toward the perturbed target
+        end
+        push!(rounded_cache, h)
+
         fw_traj = Vector{NTuple{5,Float64}}()
         fw_callback = FrankWolfe.make_print_callback(
             FrankWolfe.make_trajectory_callback(nothing, fw_traj),
-            10,
+            1,
             ("iter", "primal", "dual", "gap", "time"),
-            "%6i %12e %12e %12e %12e\n",
+            "%6i %15e %15e %15e %15e\n",
             FrankWolfe.callback_state
         )
 
         stats.fw_calls += 1
         
-        # Step 2: Euclidean Projection using Frank-Wolfe
+        # Step 2: Projection using Frank-Wolfe
         @time x_new, _ = frank_wolfe(
-            y -> f_proj(y, x_round),
-            (g, y) -> g_proj(g, y, x_round),
+            x -> f_proj(x, x_round),
+            (storage, x) -> g_proj(storage, x, x_round),
             lmo,
             x,
             max_iteration = DEF_FW_MAX_ITER,
             verbose = false,
-            line_search = FrankWolfe.Adaptive(),
+            line_search = FrankWolfe.Adaptive(),  # Agnostic works better for non-smooth objectives
             epsilon = 1e-7,
             callback = fw_callback
         )
@@ -181,31 +227,42 @@ function SCIP.find_primal_solution(
             stats.solution_found = true
             stats.final_objective = obj_val
 
-            # Track best solution (for minimization problems)
-            if obj_val < best_objective
-                best_objective = obj_val
-                best_solution = copy(x_new)
-            end
+            found_objective = obj_val
+            found_solution = copy(x_new)
 
             # Submit solution to SCIP
             if submit_solution_to_scip(scip, heur_ptr, lp_cols, x_new, nvars)
                 result = SCIP.SCIP_FOUNDSOL
+                break  # Exit after finding a feasible solution
             else
                 println("Solution rejected by SCIP")
                 break
             end
         else
-            # Short cycle detection
-            # TODO: Implement cycle detection, maybe with a cache of previous rounded solutions
+            # Fixed-point detection: solution barely changed
             if distance < DEF_TOLERANCE
-                println("Converged to fixed point without finding integer solution")
-                cycle = true
-                break
+                restart_count += 1
+                println("Converged to fixed point at iteration $iter (restart #$restart_count)")
+
+                if restart_count >= DEF_MAX_RESTARTS
+                    println("Maximum restarts ($DEF_MAX_RESTARTS) reached, stopping.")
+                    break
+                end
+
+                # Reset to feasible point and let next iteration create a new rounding target
+                x .= last_feasible_x
+                # Slightly perturb x within feasible bounds to get different rounding
+                for i in binary
+                    x[i] = clamp(x[i] + 0.1 * (rand() - 0.5), 0.0, 1.0)
+                end
+                println("Perturbed and reset, continuing...")
+                continue
             end
 
-            # If not feasible, continue with the non-rounded solution for next FW iteration
-            prev_x .= copy(x)
+            # Continue with the projected solution for next FW iteration
+            prev_x .= x
             x .= x_new
+            last_feasible_x .= x_new  # Store as last known feasible point
         end
     end
 
@@ -216,14 +273,14 @@ function SCIP.find_primal_solution(
     println("="^80)
     println("Total time:        $(round(total_time, digits=2)) seconds")
     println("FP iterations:     $(stats.fp_iterations)")
-    println("FW calls:          $(stats.fw_calls)")
     println("FW iterations:     $(stats.fw_iterations)")
+    println("Restarts (cycles): $restart_count")
     println("Solution found:    $(stats.solution_found)")
 
-    if best_solution !== nothing
-        println("\nBEST SOLUTION FOUND:")
-        println("  Objective value: $best_objective")
-        println("  Solution vector (first 20 vars): $(best_solution[1:min(20, length(best_solution))])")
+    if found_solution !== nothing
+        println("\nFIRST SOLUTION FOUND:")
+        println("  Objective value: $found_objective")
+        println("  Solution vector (first 20 vars): $(found_solution[1:min(20, length(found_solution))])")
     else
         println("\nNo feasible integer solution found.")
     end
@@ -237,7 +294,7 @@ function submit_solution_to_scip(
     heur_ptr::Ptr{SCIP.SCIP_HEUR},
     lp_cols::Vector{Ptr{SCIP.SCIP_COL}},
     solution::Vector{Float64},
-    nvars::Int
+    nvars::Int32
 )::Bool
 
     sol_ptr = Ref{Ptr{SCIP.SCIP_SOL}}()

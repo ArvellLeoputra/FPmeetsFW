@@ -117,35 +117,11 @@ function set_verbosity!(model::JuMP.Model, level::Int)
     set_param(model, "display/verblevel", level)
 end
 
-function setup_for_custom_heuristic(
-    disable_other_heuristics=true,
-    disable_cuts=true,
-    disable_presolve=false,
-    time_limit=3600,
-    node_limit=1000,
-    verbosity=4
+function minimal_setup(;
+    time_limit=DEF_TIME_LIMIT,
+    node_limit=2,
+    verbosity=5
 )
-    model = create_scip_model()
-    
-    if disable_other_heuristics
-        disable_all_heuristics!(model)
-    end
-    
-    if disable_cuts
-        disable_cuts!(model)
-    end
-    
-    if disable_presolve
-        disable_presolving!(model)
-    end
-    
-    set_limits!(model, time_limit=time_limit, node_limit=node_limit)
-    set_verbosity!(model, verbosity)
-    
-    return model
-end
-
-function minimal_setup()
     model = create_scip_model()
 
     disable_all_heuristics!(model)
@@ -155,9 +131,9 @@ function minimal_setup()
     disable_root_node_propagation!(model)
     disable_strong_branching_lookahead!(model)
 
-    set_verbosity!(model, 5)
-    set_limits!(model, time_limit=3600, node_limit=2)
+    set_verbosity!(model, verbosity)
+    set_limits!(model, time_limit=time_limit, node_limit=node_limit)
     set_param(model, "separating/maxroundsroot", 1)
-    
+
     return model
 end

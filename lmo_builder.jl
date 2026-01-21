@@ -9,7 +9,7 @@ function build_lmo_from_scip_lp(scip::Ptr{SCIP.SCIP_}, nvars, nrows)
 
     # Build MOI model from current LP
     moi_model = MOI.Utilities.Model{Float64}()
-    x = add_variables(moi_model, nvars)
+    x = MOI.add_variables(moi_model, nvars)
 
     # Add variable bounds
     for j in 1:nvars
@@ -20,10 +20,10 @@ function build_lmo_from_scip_lp(scip::Ptr{SCIP.SCIP_}, nvars, nrows)
         ub = SCIP.SCIPvarGetUbLocal(var)
 
         if lb > -SCIP.SCIPinfinity(scip)
-            add_constraint(moi_model, x[j], GreaterThan(lb))
+            MOI.add_constraint(moi_model, x[j], MOI.GreaterThan(lb))
         end
         if ub < SCIP.SCIPinfinity(scip)
-            add_constraint(moi_model, x[j], LessThan(ub))
+            MOI.add_constraint(moi_model, x[j], MOI.LessThan(ub))
         end
     end
 
@@ -36,22 +36,22 @@ function build_lmo_from_scip_lp(scip::Ptr{SCIP.SCIP_}, nvars, nrows)
         nonzero_cols = unsafe_wrap(Vector{Ptr{SCIP.SCIP_COL}}, SCIP.SCIProwGetCols(row), nnonz)
         nonzero_vals = unsafe_wrap(Vector{SCIP.SCIP_Real}, SCIP.SCIProwGetVals(row), nnonz)
 
-        terms = [ScalarAffineTerm(nonzero_vals[k], x[col_to_idx[nonzero_cols[k]]]) for k in 1:nnonz]
-        aff = ScalarAffineFunction(terms, 0.0)
+        terms = [MOI.ScalarAffineTerm(nonzero_vals[k], x[col_to_idx[nonzero_cols[k]]]) for k in 1:nnonz]
+        aff = MOI.ScalarAffineFunction(terms, 0.0)
 
         lhs = SCIP.SCIProwGetLhs(row)
         rhs = SCIP.SCIProwGetRhs(row)
 
         if lhs > -SCIP.SCIPinfinity(scip)
-            add_constraint(moi_model, aff, GreaterThan(lhs))
+            MOI.add_constraint(moi_model, aff, MOI.GreaterThan(lhs))
         end
         if rhs < SCIP.SCIPinfinity(scip)
-            add_constraint(moi_model, aff, LessThan(rhs))
+            MOI.add_constraint(moi_model, aff, MOI.LessThan(rhs))
         end
     end
 
     # Create LMO
     opt_model = GLPK.Optimizer()
-    copy_to(opt_model, moi_model)
+    MOI.copy_to(opt_model, moi_model)
     return FrankWolfe.MathOptLMO(opt_model)
 end
