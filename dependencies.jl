@@ -10,12 +10,13 @@ const MOI = MathOptInterface
 
 export MOI, FPFWHeuristic, FPFWStats
 export DEF_TOLERANCE, DEF_FW_MAX_ITER, DEF_FP_MAX_ITER
-export DEF_TIME_LIMIT, DEF_PERTURB_FRACTION, DEF_MAX_RESTARTS, DEF_RANDOM_SEED
+export DEF_SCIP_TIME_LIMIT, DEF_FW_TIME_LIMIT, DEF_PERTURB_FRACTION, DEF_MAX_RESTARTS, DEF_RANDOM_SEED, DEF_ROUNDING_THRESHOLD
 
 mutable struct FPFWHeuristic <: SCIP.Heuristic
     called::Int64
     lmo::Union{Nothing, FrankWolfe.MathOptLMO}
     projection_norm::Symbol
+    rounding_threshold::Float64
 end
 
 mutable struct FPFWStats
@@ -39,7 +40,8 @@ const DEF_FW_MAX_ITER = 100
 const DEF_FP_MAX_ITER = 1000
 
 # Time limit
-const DEF_TIME_LIMIT = 3600.0
+const DEF_SCIP_TIME_LIMIT = 600.0
+const DEF_FW_TIME_LIMIT = 300.0
 
 # Perturbation parameters
 const DEF_PERTURB_FRACTION = 0.2      # Fraction of binary vars to flip when perturbing
@@ -47,6 +49,8 @@ const DEF_MAX_RESTARTS = 50           # Maximum number of restarts after cycles
 
 # Random seed for reproducibility
 const DEF_RANDOM_SEED = 42
+
+const DEF_ROUNDING_THRESHOLD = 0.47
 
 end
 

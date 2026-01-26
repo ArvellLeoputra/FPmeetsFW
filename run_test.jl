@@ -4,14 +4,14 @@ include("helper.jl")
 include("fpfwheur.jl")
 include("lmo_builder.jl")
 
-function mps_test_model(filename::String, projection_norm::Symbol)
+function mps_test_model(filename::String, projection_norm::Symbol, rounding_threshold::Float64)
     model = minimal_setup(verbosity=3)
     backend = JuMP.unsafe_backend(model)
     scip = backend.inner
 
     SCIP.SCIPreadProb(scip, filename, C_NULL)
 
-    heur = FPFWHeuristic(0, nothing, projection_norm)
+    heur = FPFWHeuristic(0, nothing, projection_norm, rounding_threshold)
     SCIP.include_heuristic(
         backend,
         heur,
@@ -47,20 +47,19 @@ if projection_norm ∉ valid_norms
     error("Invalid projection norm: $projection_norm. Must be one of: $valid_norms")
 end
 
+rounding_threshold = length(ARGS) >= 3 ? parse(Float64, ARGS[3]) : DEF_ROUNDING_THRESHOLD
+
+if rounding_threshold < 0.0 || rounding_threshold > 1.0
+    error("Rounding threshold must be between 0.0 and 1.0, got: $rounding_threshold")
+end
+
 println("\n" * "="^80)
 println("Loading instance: $filename")
 println("Projection norm: $projection_norm")
+println("Rounding threshold: $rounding_threshold")
 println("="^80 * "\n")
 
 start_time = time()
-result = mps_test_model(filename, projection_norm)
+result = mps_test_model(filename, projection_norm, rounding_threshold)
 total_time = time() - start_time
 
-println("\n" * "="^80)
-println("FINAL RESULT")
-println("="^80)
-println("Status:       $(result.status)")
-println("Solutions:    $(result.nsols)")
-println("Objective:    $(result.objective)")
-println("Total time:   $(round(total_time, digits=2)) seconds")
-println("="^80)

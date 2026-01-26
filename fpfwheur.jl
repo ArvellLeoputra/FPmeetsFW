@@ -121,6 +121,15 @@ function SCIP.find_primal_solution(
         return hash(tuple((x_round[i] for i in binary_indices)...))
     end
 
+    # Rounding function using custom threshold
+    function round_with_threshold(x, binary_indices, threshold)
+        x_round = copy(x)
+        for i in binary_indices
+            x_round[i] = x[i] >= threshold ? 1.0 : 0.0
+        end
+        return x_round
+    end
+
     # Main Feasibility Pump with Frank-Wolfe Loop
     x = copy(current_solution)  # Initial LP feasible solution
     prev_x = copy(x)  # To calculate distance moved
@@ -140,16 +149,13 @@ function SCIP.find_primal_solution(
 
         # Check time limit
         elapsed = time() - total_start_time
-        if elapsed > DEF_TIME_LIMIT
-            println("Time limit reached ($(round(elapsed, digits=2))s > $(DEF_TIME_LIMIT)s)")
+        if elapsed > DEF_FW_TIME_LIMIT
+            println("FW time limit reached ($(round(elapsed, digits=2))s > $(DEF_FW_TIME_LIMIT)s)")
             break
         end
 
-        # Step 1: Rounding LP feasible solution
-        x_round = copy(x)
-        for i in binary
-            x_round[i] = round(x[i])
-        end
+        # Step 1: Rounding LP feasible solution with custom threshold
+        x_round = round_with_threshold(x, binary, heur.rounding_threshold)
 
         # Cycle detection: check if we've visited this rounded solution before
         h = hash_rounded(x_round, binary)
@@ -178,7 +184,7 @@ function SCIP.find_primal_solution(
         fw_traj = Vector{NTuple{5,Float64}}()
         fw_callback = FrankWolfe.make_print_callback(
             FrankWolfe.make_trajectory_callback(nothing, fw_traj),
-            1,
+            10,
             ("iter", "primal", "dual", "gap", "time"),
             "%6i %15e %15e %15e %15e\n",
             FrankWolfe.callback_state
@@ -194,7 +200,7 @@ function SCIP.find_primal_solution(
             x,
             max_iteration = DEF_FW_MAX_ITER,
             verbose = false,
-            line_search = FrankWolfe.Adaptive(),  # Agnostic works better for non-smooth objectives
+            line_search = FrankWolfe.Agnostic(),  # Agnostic works better for non-smooth objectives
             epsilon = 1e-7,
             callback = fw_callback
         )

@@ -52,9 +52,11 @@ Configurable in `dependencies.jl`:
 |-----------|---------|-------------|
 | `DEF_FW_MAX_ITER` | 100 | Max Frank-Wolfe iterations per projection |
 | `DEF_FP_MAX_ITER` | 1000 | Max Feasibility Pump iterations |
-| `DEF_TIME_LIMIT` | 300s | Time limit |
+| `DEF_SCIP_TIME_LIMIT` | 3600s | Time limit |
+| `DEF_FW_TIME_LIMIT` | 300s | Time limit |
 | `DEF_PERTURB_FRACTION` | 0.2 | Fraction of binary vars to flip on perturbation |
 | `DEF_MAX_RESTARTS` | 50 | Max restarts after cycle detection |
+| `DEF_ROUNDING_THRESHOLD` | 0.47 | Rounding threshold |
 
 ## Dependencies
 
