@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+
+# Personal files
+Benchmark/
+Benchmark_Selected.numbers
+*.txt
+idea.jl
+
+# Julia artifacts (optional - some people include Manifest.toml)
+# Manifest.toml

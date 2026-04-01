@@ -1,13 +1,13 @@
 # Helper function to check constraint feasibility
 function check_feasibility(
-    scip::Ptr{SCIP.SCIP_}, 
+    scip::Ptr{SCIP.SCIP_},
     solution::Vector{Float64},
+    col_to_idx::Dict{Ptr{SCIP.SCIP_COL}, Int},
     tolerance::Float64=DEF_TOLERANCE
 )::Bool
 
     ncols = SCIP.SCIPgetNLPCols(scip)
     nrows = SCIP.SCIPgetNLPRows(scip)
-    all_vars = unsafe_wrap(Vector{Ptr{SCIP.SCIP_VAR}}, SCIP.SCIPgetVars(scip), ncols)
 
     ptr_rows = SCIP.SCIPgetLPRows(scip)
     lp_rows = unsafe_wrap(Vector{Ptr{SCIP.SCIP_ROW}}, ptr_rows, nrows)
@@ -17,19 +17,16 @@ function check_feasibility(
 
     # Check bounds
     for j in 1:ncols
-        vars = all_vars[j]
-        lb = SCIP.SCIPvarGetLbLocal(vars)
-        ub = SCIP.SCIPvarGetUbLocal(vars)
+        var = SCIP.SCIPcolGetVar(lp_cols[j])
+        lb = SCIP.SCIPvarGetLbLocal(var)
+        ub = SCIP.SCIPvarGetUbLocal(var)
 
         if solution[j] < lb - tolerance || solution[j] > ub + tolerance
-            # println("Variable $j violates bounds: $lb <= $(solution[j]) <= $ub")
             return false
         end
     end
-    
-    # Constraint check using rows
-    col_to_idx = Dict(lp_cols[k] => k for k in 1:ncols)
 
+    # Constraint check using rows
     for i in 1:nrows
         row = lp_rows[i]
 
@@ -49,14 +46,12 @@ function check_feasibility(
         rhs = SCIP.SCIProwGetRhs(row)
 
         if lhs > -SCIP.SCIPinfinity(scip) && activity < lhs - tolerance
-            # println("Constraint $i violates LHS: $activity >= $lhs")
             return false
         end
 
         if rhs < SCIP.SCIPinfinity(scip) && activity > rhs + tolerance
-            #println("Constraint $i violates RHS: $activity <= $rhs")
             return false
-        end 
+        end
     end
 
     return true

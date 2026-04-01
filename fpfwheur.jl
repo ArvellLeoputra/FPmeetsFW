@@ -1,3 +1,21 @@
+# Helper function to assign Frank-Wolfe variant.
+# All variants share the same return signature (x, v, primal, dual_gap, traj).
+# Note: :away, :blended_pairwise, and :blended maintain an active set internally and converge faster on smooth objectives; 
+# :vanilla is the safest choice for non-smooth (manhattan) objectives.
+function call_fw_variant(variant::Symbol, f, grad!, lmo, x0; kwargs...)
+    if variant == :vanilla
+        return FrankWolfe.frank_wolfe(f, grad!, lmo, x0; kwargs...)
+    elseif variant == :away
+        return FrankWolfe.away_frank_wolfe(f, grad!, lmo, x0; kwargs...)
+    elseif variant == :blended_pairwise
+        return FrankWolfe.blended_pairwise_conditional_gradient(f, grad!, lmo, x0; kwargs...)
+    elseif variant == :blended
+        return FrankWolfe.blended_conditional_gradient(f, grad!, lmo, x0; kwargs...)
+    else
+        error("Unknown FW variant: $variant. Choose from :vanilla, :away, :blended_pairwise, :blended")
+    end
+end
+
 # Main FPFW Heuristic Implementation
 function SCIP.find_primal_solution(
     scip::Ptr{SCIP.SCIP_},
@@ -15,35 +33,26 @@ function SCIP.find_primal_solution(
         return (SCIP.SCIP_OKAY, SCIP.SCIP_DIDNOTRUN)
     end
 
-    stats = FPFWStats()
-    total_start_time = time()
-
-    # Set random seed for reproducibility
     if DEF_RANDOM_SEED !== nothing
         Random.seed!(DEF_RANDOM_SEED)
     end
 
-    println("\n" * "="^80)
-    println("FPFW Heuristic Called (Attempt #$(heur.called))")
-    println("="^80)
+    stats = FPFWStats()
+    total_start_time = time()
 
     nvars = SCIP.SCIPgetNLPCols(scip)
     nrows = SCIP.SCIPgetNLPRows(scip)
-    println("There are $nvars variables and $nrows rows in the current LP.")
 
     # Build LMO from current LP
     if heur.lmo === nothing
-        lmo_start = time()
-        println("Building LMO...")
         heur.lmo = build_lmo_from_scip_lp(scip, nvars, nrows)
-        lmo_time = time() - lmo_start
-        println("LMO built successfully in $(round(lmo_time, digits=3)) seconds.")
     end
 
     lmo = heur.lmo
 
     ptr_cols = SCIP.SCIPgetLPCols(scip)
     lp_cols = unsafe_wrap(Vector{Ptr{SCIP.SCIP_COL}}, ptr_cols, nvars)
+    col_to_idx = Dict(lp_cols[k] => k for k in 1:nvars)
 
     binary = Int[]
     current_solution = zeros(SCIP.SCIP_Real, nvars)
@@ -60,7 +69,14 @@ function SCIP.find_primal_solution(
         current_solution[j] = SCIP.SCIPcolGetPrimsol(col) # Get current LP solution
     end
 
-    println("Binary variables: $(length(binary)) out of $nvars")
+    # DEBUG: Print initial LP solution details
+    if DEBUG_VERBOSE
+        println("[DEBUG] Initial LP solution:")
+        for j in 1:nvars
+            var = SCIP.SCIPcolGetVar(lp_cols[j])
+            @printf("  x[%d] = %.3f\n", j, current_solution[j])
+        end
+    end
 
     lp_obj = 0.0
     for j in 1:nvars
@@ -68,7 +84,6 @@ function SCIP.find_primal_solution(
     end
 
     println("Initial LP objective: $(round(lp_obj, digits=4))")
-    println("Using projection norm: $(heur.projection_norm)")
 
     if heur.projection_norm == :manhattan
         f_proj = (x, x_round) -> begin
@@ -141,7 +156,6 @@ function SCIP.find_primal_solution(
 
     # Store first feasible solution found
     found_solution = nothing
-    found_objective = Inf
 
     for iter in 1:DEF_FP_MAX_ITER
         println("\n--- FPFW Iteration $iter ---")
@@ -156,6 +170,14 @@ function SCIP.find_primal_solution(
 
         # Step 1: Rounding LP feasible solution with custom threshold
         x_round = round_with_threshold(x, binary, heur.rounding_threshold)
+
+        # DEBUG: Print before/after rounding
+        if DEBUG_VERBOSE
+            println("[DEBUG] Rounding (threshold=$(heur.rounding_threshold)):")
+            for i in binary
+                @printf("  x[%d]: %.3f -> %.1f\n", i, x[i], x_round[i])
+            end
+        end
 
         # Cycle detection: check if we've visited this rounded solution before
         h = hash_rounded(x_round, binary)
@@ -181,45 +203,49 @@ function SCIP.find_primal_solution(
         end
         push!(rounded_cache, h)
 
-        fw_traj = Vector{NTuple{5,Float64}}()
-        fw_callback = FrankWolfe.make_print_callback(
-            FrankWolfe.make_trajectory_callback(nothing, fw_traj),
-            10,
-            ("iter", "primal", "dual", "gap", "time"),
-            "%6i %15e %15e %15e %15e\n",
-            FrankWolfe.callback_state
-        )
+        fw_traj = Vector{Any}()
+        fw_callback = FrankWolfe.make_trajectory_callback(nothing, fw_traj)
 
-        stats.fw_calls += 1
-        
         # Step 2: Projection using Frank-Wolfe
-        @time x_new, _ = frank_wolfe(
+        ls = heur.line_search == :backtracking ? FrankWolfe.Backtracking() : FrankWolfe.Agnostic()
+        fw_start = time()
+        x_new, _ = call_fw_variant(
+            heur.fw_variant,
             x -> f_proj(x, x_round),
             (storage, x) -> g_proj(storage, x, x_round),
             lmo,
             x,
             max_iteration = DEF_FW_MAX_ITER,
             verbose = false,
-            line_search = FrankWolfe.Agnostic(),  # Agnostic works better for non-smooth objectives
+            line_search = ls,
             epsilon = 1e-7,
             callback = fw_callback
         )
+        stats.fw_time += time() - fw_start
 
         fw_iters = length(fw_traj)
         stats.fw_iterations += fw_iters
 
-        if fw_iters > 0
-            stats.fw_time += fw_traj[end][5] - fw_traj[1][5]
+        # DEBUG: Print FW projection result
+        if DEBUG_VERBOSE
+            total_dist = sum(abs(x_new[i] - x_round[i]) for i in binary)
+            @printf("[DEBUG] FW done: %d iters, dist to rounding target = %.6f\n", fw_iters, total_dist)
         end
 
         # Step 3: Check feasibility and integrality and calculate current objective value
         is_integral = check_integrality(x_new, binary)
-        is_feasible = check_feasibility(scip, x_new)
+        is_feasible = check_feasibility(scip, x_new, col_to_idx)
         distance = sqrt(sum((x_new[i] - prev_x[i])^2 for i in binary))
 
         obj_val = 0.0
         for j in 1:nvars
             obj_val += x_new[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lp_cols[j]))
+        end
+
+        # DEBUG: Print integrality check details
+        if DEBUG_VERBOSE
+            @printf("[DEBUG] integral=%s, feasible=%s, obj=%.6f, dist=%.6f\n",
+                is_integral, is_feasible, obj_val, distance)
         end
 
         # Just for debugging
@@ -229,12 +255,19 @@ function SCIP.find_primal_solution(
         end
 
         if is_integral
-            println("Found feasible integer solution at iteration $iter with objective $obj_val")
             stats.solution_found = true
             stats.final_objective = obj_val
 
-            found_objective = obj_val
             found_solution = copy(x_new)
+
+            # DEBUG: Print the found solution in detail
+            if DEBUG_VERBOSE
+                println("[DEBUG] Solution values:")
+                for j in 1:nvars
+                    var = SCIP.SCIPcolGetVar(lp_cols[j])
+                    @printf("  x[%d] = %.6f (obj=%.4f)\n", j, x_new[j], SCIP.SCIPvarGetObj(var))
+                end
+            end
 
             # Submit solution to SCIP
             if submit_solution_to_scip(scip, heur_ptr, lp_cols, x_new, nvars)
@@ -274,18 +307,20 @@ function SCIP.find_primal_solution(
 
     # Print final summary
     total_time = time() - total_start_time
+    stats.total_time = total_time
     println("\n" * "="^80)
     println("FPFW HEURISTIC SUMMARY")
     println("="^80)
     println("Total time:        $(round(total_time, digits=2)) seconds")
     println("FP iterations:     $(stats.fp_iterations)")
     println("FW iterations:     $(stats.fw_iterations)")
+    println("FW time:           $(round(stats.fw_time, digits=2)) seconds")
     println("Restarts (cycles): $restart_count")
     println("Solution found:    $(stats.solution_found)")
 
     if found_solution !== nothing
         println("\nFIRST SOLUTION FOUND:")
-        println("  Objective value: $found_objective")
+        println("  Objective value: $(stats.final_objective)")
         println("  Solution vector (first 20 vars): $(found_solution[1:min(20, length(found_solution))])")
     else
         println("\nNo feasible integer solution found.")

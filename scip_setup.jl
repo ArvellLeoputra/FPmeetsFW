@@ -1,4 +1,4 @@
-# SCIP configuration and setup utilities for isolated testing of FPFW heuristic{|}
+# SCIP configuration and setup utilities for isolated testing of FPFW heuristic
 function set_param(model::JuMP.Model, param::String, value)
     JuMP.set_attribute(model, param, value)
 end
