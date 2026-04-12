@@ -31,7 +31,7 @@ function mps_test_model(filename::String, projection_norm::Symbol, rounding_thre
 end
 
 if length(ARGS) < 1
-    error("Usage: julia --project run_test.jl <filename.mps> [euclidean|manhattan] [threshold] [vanilla|away|blended_pairwise|blended] [agnostic|backtracking]")
+    error("Usage: julia --project run_test.jl <filename.mps> [euclidean|manhattan|abssmooth] [threshold] [vanilla|away|blended_pairwise|blended] [agnostic|backtracking|secant|adaptive]")
 end
 
 filename = ARGS[1]
@@ -42,7 +42,7 @@ end
 
 projection_norm = length(ARGS) >= 2 ? Symbol(ARGS[2]) : :euclidean
 
-valid_norms = (:euclidean, :manhattan)
+valid_norms = (:euclidean, :manhattan, :abssmooth)
 if projection_norm ∉ valid_norms
     error("Invalid projection norm: $projection_norm. Must be one of: $valid_norms")
 end
@@ -62,7 +62,7 @@ end
 
 line_search = length(ARGS) >= 5 ? Symbol(ARGS[5]) : DEF_LINE_SEARCH
 
-valid_line_searches = (:agnostic, :backtracking)
+valid_line_searches = (:agnostic, :backtracking, :secant, :adaptive)
 if line_search ∉ valid_line_searches
     error("Invalid line search: $line_search. Must be one of: $valid_line_searches")
 end

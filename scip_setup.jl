@@ -3,11 +3,6 @@ function set_param(model::JuMP.Model, param::String, value)
     JuMP.set_attribute(model, param, value)
 end
 
-function create_scip_model()
-    model = Model(SCIP.Optimizer)
-    return model
-end
-
 function disable_all_heuristics!(model::JuMP.Model)
     set_param(model, "heuristics/padm/freq", -1)
     set_param(model, "heuristics/ofins/freq", -1)
@@ -119,10 +114,10 @@ end
 
 function minimal_setup(;
     time_limit=DEF_SCIP_TIME_LIMIT,
-    node_limit=2,
+    node_limit=1,
     verbosity=5
 )
-    model = create_scip_model()
+    model = Model(SCIP.Optimizer)
 
     disable_all_heuristics!(model)
     disable_separators!(model)

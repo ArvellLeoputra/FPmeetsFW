@@ -51,7 +51,8 @@ function build_lmo_from_scip_lp(scip::Ptr{SCIP.SCIP_}, nvars, nrows)
     end
 
     # Create LMO
-    opt_model = GLPK.Optimizer()
+    opt_model = SCIP.Optimizer()
+    MOI.set(opt_model, MOI.RawOptimizerAttribute("display/verblevel"), 0)
     MOI.copy_to(opt_model, moi_model)
     return FrankWolfe.MathOptLMO(opt_model)
 end
