@@ -10,4 +10,4 @@ Benchmark_Selected.numbers
 idea.jl
 
 # Julia artifacts (optional - some people include Manifest.toml)
-# Manifest.toml
+Manifest.toml
