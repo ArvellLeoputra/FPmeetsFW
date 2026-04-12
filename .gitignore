@@ -5,7 +5,6 @@
 .vscode/
 
 # Personal files
-Benchmark/
 Benchmark_Selected.numbers
 *.txt
 idea.jl
