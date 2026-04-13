@@ -41,7 +41,7 @@ const DEF_FW_MAX_ITER = 1000
 const DEF_FP_MAX_ITER = 100
 
 # Time limit
-const DEF_SCIP_TIME_LIMIT = 600.0
+const DEF_SCIP_TIME_LIMIT = 480.0
 const DEF_FW_TIME_LIMIT = 300.0
 
 # Perturbation parameters
