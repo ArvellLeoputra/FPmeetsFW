@@ -6,8 +6,8 @@
 
 # Personal files
 Benchmark_Selected.numbers
-*.txt
+*_result.txt
 idea.jl
 
-# Julia artifacts (optional - some people include Manifest.toml)
+# Julia
 Manifest.toml
