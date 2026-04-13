@@ -39,8 +39,9 @@ function build_lmo_from_scip_lp(scip::Ptr{SCIP.SCIP_}, nvars, nrows)
         terms = [MOI.ScalarAffineTerm(nonzero_vals[k], x[col_to_idx[nonzero_cols[k]]]) for k in 1:nnonz]
         aff = MOI.ScalarAffineFunction(terms, 0.0)
 
-        lhs = SCIP.SCIProwGetLhs(row)
-        rhs = SCIP.SCIProwGetRhs(row)
+        constant = SCIP.SCIProwGetConstant(row)
+        lhs = SCIP.SCIProwGetLhs(row) - constant
+        rhs = SCIP.SCIProwGetRhs(row) - constant
 
         if lhs > -SCIP.SCIPinfinity(scip)
             MOI.add_constraint(moi_model, aff, MOI.GreaterThan(lhs))
