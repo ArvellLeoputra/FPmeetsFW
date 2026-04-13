@@ -26,6 +26,7 @@ for i in "${!NORMS[@]}"; do
 
         OUT_DIR="$BASE_DIR/run/$NAME/output"
         ERR_DIR="$BASE_DIR/run/$NAME/error"
+        rm -rf "$OUT_DIR" "$ERR_DIR"
         mkdir -p "$OUT_DIR" "$ERR_DIR"
 
         sbatch <<EOF

@@ -191,6 +191,7 @@ function SCIP.find_primal_solution(
         FrankWolfe.Agnostic()
     end
 
+    fp_iteration_limit_reached = false
     for iter in 1:DEF_FP_MAX_ITER
         if DEBUG_VERBOSE
             println("\n--- FPFW Iteration $iter ---")
@@ -389,6 +390,14 @@ function SCIP.find_primal_solution(
             x .= x_new
             last_projected_x .= x_new  # Store as last known feasible point
         end
+
+        if iter == DEF_FP_MAX_ITER
+            fp_iteration_limit_reached = true
+        end
+    end
+
+    if fp_iteration_limit_reached
+        println("Maximum FP iterations ($DEF_FP_MAX_ITER) reached, stopping.")
     end
 
     # Print final summary

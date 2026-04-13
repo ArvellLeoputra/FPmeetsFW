@@ -142,6 +142,9 @@ for i in "${!NORMS[@]}"; do
             # Check for restart limit (both cycle and fixed-point)
             restart_limit=$(grep -qE "Maximum (cycle|fixed-point) restarts.*reached, stopping" "$output_file" && echo "yes" || echo "")
 
+            # Check for FP iteration limit
+            fp_iterationlimit=$(grep -q "Maximum FP iterations" "$output_file" && echo "yes" || echo "")
+
             # Check for FW infeasibility
             fw_infeasible=$(grep -q "FrankWolfe return infeasible solution!" "$output_file" && echo "yes" || echo "")
 
@@ -225,7 +228,17 @@ for i in "${!NORMS[@]}"; do
                 runtime_display="${total_time:-N/A}"
                 printf "%-8s %-40s %-15s %-50s\n" "$task_id" "$instance_name" "$runtime_display" "Maximum restarts reached" >> "$FAILED_FILE"
 
-            # Priority 6: Unknown
+            # Priority 6: FP iteration limit
+            elif [ -n "$fp_iterationlimit" ]; then
+                status="FAILED"
+                failure_reason="FP_ITERATION_LIMIT (max FP iterations reached)"
+                failure_type="FP_ITERATION_LIMIT"
+                failed_count=$((failed_count + 1))
+                fp_iterationlimit_count=$((fp_iterationlimit_count + 1))
+                runtime_display="${total_time:-N/A}"
+                printf "%-8s %-40s %-15s %-50s\n" "$task_id" "$instance_name" "$runtime_display" "Maximum FP iterations reached" >> "$FAILED_FILE"
+
+            # Priority 7: Unknown
             else
                 status="FAILED"
                 failure_reason="UNKNOWN_ERROR"
@@ -322,6 +335,7 @@ for i in "${!NORMS[@]}"; do
         echo "  - Due to FW time limit:    $fw_timelimit_count" >> "$SUMMARY_FILE"
         echo "  - Due to restart limit:    $restart_limit_count" >> "$SUMMARY_FILE"
         echo "  - Due to FW infeasibility: $fw_infeasible_count" >> "$SUMMARY_FILE"
+        echo "  - Due to FP iter limit:    $fp_iterationlimit_count" >> "$SUMMARY_FILE"
         echo "  - Due to other reasons:    $other_failure_count" >> "$SUMMARY_FILE"
         echo "" >> "$SUMMARY_FILE"
 
