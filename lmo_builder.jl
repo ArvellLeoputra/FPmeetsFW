@@ -7,9 +7,10 @@ function build_lmo_from_scip_lp(scip::Ptr{SCIP.SCIP_}, nvars, nrows)
     ptr_rows = SCIP.SCIPgetLPRows(scip)
     lp_rows = unsafe_wrap(Vector{Ptr{SCIP.SCIP_ROW}}, ptr_rows, nrows)
 
-    # Build MOI model from current LP
-    moi_model = MOI.Utilities.Model{Float64}()
-    x = MOI.add_variables(moi_model, nvars)
+    # Build LMO model
+    opt_model = SCIP.Optimizer()
+    MOI.set(opt_model, MOI.RawOptimizerAttribute("display/verblevel"), 0)
+    x = MOI.add_variables(opt_model, nvars)
 
     # Add variable bounds
     for j in 1:nvars
@@ -20,10 +21,10 @@ function build_lmo_from_scip_lp(scip::Ptr{SCIP.SCIP_}, nvars, nrows)
         ub = SCIP.SCIPvarGetUbLocal(var)
 
         if lb > -SCIP.SCIPinfinity(scip)
-            MOI.add_constraint(moi_model, x[j], MOI.GreaterThan(lb))
+            MOI.add_constraint(opt_model, x[j], MOI.GreaterThan(lb))
         end
         if ub < SCIP.SCIPinfinity(scip)
-            MOI.add_constraint(moi_model, x[j], MOI.LessThan(ub))
+            MOI.add_constraint(opt_model, x[j], MOI.LessThan(ub))
         end
     end
 
@@ -39,21 +40,19 @@ function build_lmo_from_scip_lp(scip::Ptr{SCIP.SCIP_}, nvars, nrows)
         terms = [MOI.ScalarAffineTerm(nonzero_vals[k], x[col_to_idx[nonzero_cols[k]]]) for k in 1:nnonz]
         aff = MOI.ScalarAffineFunction(terms, 0.0)
 
+        # SCIP stores LP rows as lhs <= ax + const <= rhs
         constant = SCIP.SCIProwGetConstant(row)
         lhs = SCIP.SCIProwGetLhs(row) - constant
         rhs = SCIP.SCIProwGetRhs(row) - constant
 
         if lhs > -SCIP.SCIPinfinity(scip)
-            MOI.add_constraint(moi_model, aff, MOI.GreaterThan(lhs))
+            MOI.add_constraint(opt_model, aff, MOI.GreaterThan(lhs))
         end
         if rhs < SCIP.SCIPinfinity(scip)
-            MOI.add_constraint(moi_model, aff, MOI.LessThan(rhs))
+            MOI.add_constraint(opt_model, aff, MOI.LessThan(rhs))
         end
     end
 
-    # Create LMO
-    opt_model = SCIP.Optimizer()
-    MOI.set(opt_model, MOI.RawOptimizerAttribute("display/verblevel"), 0)
-    MOI.copy_to(opt_model, moi_model)
-    return FrankWolfe.MathOptLMO(opt_model)
+    # use_modify = false to set a new objective each iteration without modifying the model structure
+    return FrankWolfe.MathOptLMO(opt_model, false)  # might be slower, but safer
 end

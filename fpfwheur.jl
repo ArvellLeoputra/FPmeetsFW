@@ -264,7 +264,7 @@ function SCIP.find_primal_solution(
         empty!(fw_traj)
         fw_callback = (state, args...) -> begin
             if state.step_type !== FrankWolfe.ST_LAST && state.step_type !== FrankWolfe.ST_POSTPROCESS
-                x_after .= state.x .+ state.gamma .* state.d
+                x_after .= state.x .- state.gamma .* state.d
                 push!(fw_traj, (state.t, copy(x_after), state.primal))
             end
             return true
