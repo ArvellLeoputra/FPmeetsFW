@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Check results for all 28 FP-FW experiment combinations
-# Also generates one combined comparison CSV at the end
+# Generates per-combination result files, combined comparison.csv, and benchmark_summary.txt
 
 BASE_DIR="/home/htc/aleoputra/project/FPmeetsFW"
 
@@ -9,8 +9,18 @@ NORMS=("manhattan" "euclidean" "abssmooth" "euclidean" "euclidean" "abssmooth" "
 LINESEARCHES=("agnostic" "agnostic" "agnostic" "adaptive" "secant" "adaptive" "secant")
 VARIANTS=("vanilla" "away" "blended_pairwise" "blended")
 
-# Combined CSV across all 28 runs
+# Combined CSV and summary across all 28 runs
 COMBINED_CSV="$BASE_DIR/run/comparison.csv"
+BENCHMARK_SUMMARY="$BASE_DIR/run/benchmark_summary.txt"
+
+# Accumulators for benchmark summary
+declare -a SUMMARY_NAMES=()
+declare -a SUMMARY_SUCCESS=()
+declare -a SUMMARY_FAILED=()
+declare -a SUMMARY_TOTAL=()
+grand_success=0
+grand_failed=0
+grand_total=0
 
 # Clean up previous check_all.sh outputs before re-running
 rm -f "$COMBINED_CSV"
@@ -364,9 +374,39 @@ for i in "${!NORMS[@]}"; do
         echo "=========================================================="
         echo ""
         echo "Results saved to $RESULT_DIR"
+
+        # Accumulate for benchmark summary
+        SUMMARY_NAMES+=("$NAME")
+        SUMMARY_SUCCESS+=("$found_count")
+        SUMMARY_FAILED+=("$failed_count")
+        SUMMARY_TOTAL+=("$total_count")
+        grand_success=$((grand_success + found_count))
+        grand_failed=$((grand_failed + failed_count))
+        grand_total=$((grand_total + total_count))
     done
 done
 
+# ── Generate benchmark_summary.txt ───────────────────────────────────────────
+{
+echo "FPFW Benchmark Summary"
+echo "Generated: $(date)"
+echo "Instances: $(( grand_total / 28 )) per combination | Total combinations: 28"
+echo ""
+printf "%-55s %7s %7s %7s %7s\n" "Combination (norm_variant_linesearch)" "Success" "Failed" "Total" "Rate(%)"
+echo "--------------------------------------------------------------------------------------"
+for j in "${!SUMMARY_NAMES[@]}"; do
+    rate=$(awk -v s="${SUMMARY_SUCCESS[$j]}" -v t="${SUMMARY_TOTAL[$j]}" \
+        'BEGIN {if(t>0) printf "%.1f", (s/t)*100; else print "0.0"}')
+    printf "%-55s %7d %7d %7d %7s\n" \
+        "${SUMMARY_NAMES[$j]}" "${SUMMARY_SUCCESS[$j]}" "${SUMMARY_FAILED[$j]}" "${SUMMARY_TOTAL[$j]}" "$rate"
+done
+overall_rate=$(awk -v s="$grand_success" -v t="$grand_total" \
+    'BEGIN {if(t>0) printf "%.1f", (s/t)*100; else print "0.0"}')
+echo "--------------------------------------------------------------------------------------"
+printf "%-55s %7d %7d %7d %7s\n" "TOTAL" "$grand_success" "$grand_failed" "$grand_total" "$overall_rate"
+} | tee "$BENCHMARK_SUMMARY"
+
 echo ""
 echo "All 28 combinations checked."
-echo "Combined CSV: $COMBINED_CSV"
+echo "Combined CSV:       $COMBINED_CSV"
+echo "Benchmark summary:  $BENCHMARK_SUMMARY"

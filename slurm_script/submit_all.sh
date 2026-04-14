@@ -1,11 +1,18 @@
 #!/bin/bash
 
-# Submit all 28 FP-FW experiment combinations (7 norm/linesearch x 4 FW variants)
-# Each job runs as an array over 20 instances in selection_benchmark
+# Submit all 28 FP-FW experiment combinations (7 pairs of norm and linesearch x 4 FW variants)
+# Each job runs as an array over all instances in selection_benchmark
 
 BASE_DIR="/home/htc/aleoputra/project/FPmeetsFW"
 INSTANCE_DIR="$BASE_DIR/selection_benchmark"
 PROJECT_DIR="$BASE_DIR"
+
+NUM_INSTANCES=$(ls "$INSTANCE_DIR" | grep -cE '\.mps(\.gz)?$')
+if [ "$NUM_INSTANCES" -eq 0 ]; then
+    echo "Error: No .mps/.mps.gz instances found in $INSTANCE_DIR"
+    exit 1
+fi
+echo "Found $NUM_INSTANCES instances in $INSTANCE_DIR"
 
 NORMS=("manhattan" "euclidean" "abssmooth" "euclidean" "euclidean" "abssmooth" "abssmooth")
 LINESEARCHES=("agnostic" "agnostic" "agnostic" "adaptive" "secant" "adaptive" "secant")
@@ -39,11 +46,11 @@ for i in "${!NORMS[@]}"; do
 #SBATCH --mem=32G
 #SBATCH --partition=big
 #SBATCH --constraint=Gold6338
-#SBATCH --array=1-20
+#SBATCH --array=1-${NUM_INSTANCES}
 #SBATCH --output=$OUT_DIR/job_%A_%a.out
 #SBATCH --error=$ERR_DIR/job_%A_%a.err
 
-INSTANCE=\$(ls "$INSTANCE_DIR" | sort | sed -n "\${SLURM_ARRAY_TASK_ID}p")
+INSTANCE=\$(ls "$INSTANCE_DIR" | grep -E '\.mps(\.gz)?$' | sort | sed -n "\${SLURM_ARRAY_TASK_ID}p")
 
 if [ -z "\$INSTANCE" ]; then
     echo "Error: No instance found for task ID \${SLURM_ARRAY_TASK_ID}"
@@ -61,4 +68,4 @@ EOF
     done
 done
 
-echo "All 28 jobs submitted."
+echo "All 28 jobs submitted (${NUM_INSTANCES} instances each)."
