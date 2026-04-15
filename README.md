@@ -67,7 +67,7 @@ Configurable in `dependencies.jl`:
 | `DEF_FIXEDPOINT_PERTURB` | 0.1 | Magnitude of perturbation on fixed-point restart |
 | `DEF_MAX_CYCLE_RESTARTS` | 100 | Max restarts after cycle detection |
 | `DEF_MAX_FIXEDPOINT_RESTARTS` | 50 | Max restarts after fixed-point detection |
-| `DEF_ROUNDING_THRESHOLD` | 0.47 | Threshold for rounding fractional values to 1 |
+| `DEF_ROUNDING_THRESHOLD` | 0.5 | Threshold for rounding fractional values to 1 |
 | `DEF_FW_VARIANT` | `:vanilla` | FW variant (`:vanilla`, `:away`, `:blended_pairwise`, `:blended`) |
 | `DEF_LINE_SEARCH` | `:agnostic` | Line search (`:agnostic`, `:backtracking`, `:secant`, `:adaptive`) |
 | `DEF_RANDOM_SEED` | `42` | Random seed for reproducibility (`nothing` to disable) |

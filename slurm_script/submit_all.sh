@@ -3,9 +3,8 @@
 # Submit all 28 FP-FW experiment combinations (7 pairs of norm and linesearch x 4 FW variants)
 # Each job runs as an array over all instances in selection_benchmark
 
-BASE_DIR="/home/htc/aleoputra/project/FPmeetsFW"
-INSTANCE_DIR="$BASE_DIR/selection_benchmark"
-PROJECT_DIR="$BASE_DIR"
+PROJECT_DIR="/home/htc/aleoputra/project/FPmeetsFW"
+INSTANCE_DIR="$PROJECT_DIR/selection_benchmark"
 
 NUM_INSTANCES=$(ls "$INSTANCE_DIR" | grep -cE '\.mps(\.gz)?$')
 if [ "$NUM_INSTANCES" -eq 0 ]; then
@@ -18,27 +17,21 @@ NORMS=("manhattan" "euclidean" "abssmooth" "euclidean" "euclidean" "abssmooth" "
 LINESEARCHES=("agnostic" "agnostic" "agnostic" "adaptive" "secant" "adaptive" "secant")
 VARIANTS=("vanilla" "away" "blended_pairwise" "blended")
 
-# Short name mappings for job names and directories
-declare -A NORM_SHORT=( ["manhattan"]="man" ["euclidean"]="euc" ["abssmooth"]="abs" )
-declare -A LS_SHORT=( ["agnostic"]="agn" ["adaptive"]="adp" ["secant"]="sec" )
-declare -A VAR_SHORT=( ["vanilla"]="van" ["away"]="awy" ["blended_pairwise"]="bpw" ["blended"]="bld" )
-
 for i in "${!NORMS[@]}"; do
     NORM="${NORMS[$i]}"
     LS="${LINESEARCHES[$i]}"
 
     for VARIANT in "${VARIANTS[@]}"; do
         NAME="${NORM}_${VARIANT}_${LS}"
-        SHORT="${NORM_SHORT[$NORM]}_${VAR_SHORT[$VARIANT]}_${LS_SHORT[$LS]}"
 
-        OUT_DIR="$BASE_DIR/run/$NAME/output"
-        ERR_DIR="$BASE_DIR/run/$NAME/error"
+        OUT_DIR="$PROJECT_DIR/run/$NAME/output"
+        ERR_DIR="$PROJECT_DIR/run/$NAME/error"
         rm -rf "$OUT_DIR" "$ERR_DIR"
         mkdir -p "$OUT_DIR" "$ERR_DIR"
 
-        sbatch <<EOF
+        sbatch <<EOF || { echo "ERROR: sbatch failed for $NAME"; continue; }
 #!/bin/bash
-#SBATCH --job-name=fpfw_$SHORT
+#SBATCH --job-name=fpfw_$NAME
 #SBATCH --time=10:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -68,4 +61,4 @@ EOF
     done
 done
 
-echo "All 28 jobs submitted (${NUM_INSTANCES} instances each)."
+echo "All $((${#NORMS[@]} * ${#VARIANTS[@]})) jobs submitted (${NUM_INSTANCES} instances each)."
