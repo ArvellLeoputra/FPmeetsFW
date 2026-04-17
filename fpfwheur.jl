@@ -191,8 +191,9 @@ function SCIP.find_primal_solution(
         FrankWolfe.Agnostic()
     end
 
-    fp_iteration_limit_reached = false
-    for iter in 1:DEF_FP_MAX_ITER
+    iter = 0
+    while true
+        iter += 1
         if DEBUG_VERBOSE
             println("\n--- FPFW Iteration $iter ---")
         end
@@ -391,13 +392,6 @@ function SCIP.find_primal_solution(
             last_projected_x .= x_new  # Store as last known feasible point
         end
 
-        if iter == DEF_FP_MAX_ITER
-            fp_iteration_limit_reached = true
-        end
-    end
-
-    if fp_iteration_limit_reached
-        println("Maximum FP iterations ($DEF_FP_MAX_ITER) reached, stopping.")
     end
 
     # Print final summary
@@ -406,6 +400,7 @@ function SCIP.find_primal_solution(
     println("\n" * "="^80)
     println("FPFW HEURISTIC SUMMARY")
     println("="^80)
+    println("Binary variables:  $(length(binary))")
     println("Total time:        $(round(total_time, digits=2)) seconds")
     println("FP iterations:     $(stats.fp_iterations)")
     println("FW iterations:     $(stats.fw_iterations)")

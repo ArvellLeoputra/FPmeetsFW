@@ -38,7 +38,7 @@ const DEF_FW_TOLERANCE = 1e-7
 
 # Iteration parameters
 const DEF_FW_MAX_ITER = 1000
-const DEF_FP_MAX_ITER = 100
+# const DEF_FP_MAX_ITER = 100
 
 # Time limit
 const DEF_SCIP_TIME_LIMIT = 480.0

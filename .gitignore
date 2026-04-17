@@ -5,9 +5,17 @@
 .vscode/
 
 # Personal files
+Benchmark
 Benchmark_Selected.numbers
+benchmark_summary.txt
 *_result.txt
 idea.jl
+run_debug_in.sh
+comparison.csv
+testcase/air05.mps
+testcase/neos5.mps
+testcase/unitcal_7.mps
+testcase/output/
 
 # Julia
 Manifest.toml

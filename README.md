@@ -58,7 +58,6 @@ Configurable in `dependencies.jl`:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `DEF_FW_MAX_ITER` | 1000 | Max Frank-Wolfe iterations per projection |
-| `DEF_FP_MAX_ITER` | 100 | Max Feasibility Pump iterations |
 | `DEF_SCIP_TIME_LIMIT` | 600s | SCIP solver time limit |
 | `DEF_FW_TIME_LIMIT` | 300s | Total FP-FW heuristic time limit |
 | `DEF_TOLERANCE` | 1e-6 | Tolerance for feasibility/integrality checks |

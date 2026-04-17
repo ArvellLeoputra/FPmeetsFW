@@ -21,6 +21,7 @@ declare -a SUMMARY_NAMES=()
 declare -a SUMMARY_SUCCESS=()
 declare -a SUMMARY_FAILED=()
 declare -a SUMMARY_TOTAL=()
+declare -A INSTANCE_BINVARS=()
 grand_success=0
 grand_failed=0
 grand_total=0
@@ -70,14 +71,14 @@ for i in "${!NORMS[@]}"; do
         echo "" >> "$DETAILED_FILE"
 
         echo "Test cases with solutions found:" > "$FOUND_FILE"
-        echo "============================================================================================================" >> "$FOUND_FILE"
-        printf "%-3s %-25s %-12s %-10s %-10s %-10s %-10s %-12s %-8s\n" "ID" "Instance" "Time (s)" "FP Iters" "FW Iters" "Rst Cycles" "Rst Fixed" "Objective" "Gap (%)" >> "$FOUND_FILE"
-        echo "============================================================================================================" >> "$FOUND_FILE"
+        echo "====================================================================================================================" >> "$FOUND_FILE"
+        printf "%-3s %-25s %-8s %-12s %-10s %-10s %-10s %-10s %-12s %-8s\n" "ID" "Instance" "Bin Vars" "Time (s)" "FP Iters" "FW Iters" "Rst Cycles" "Rst Fixed" "Objective" "Gap (%)" >> "$FOUND_FILE"
+        echo "====================================================================================================================" >> "$FOUND_FILE"
 
         echo "Failed/Interrupted runs:" > "$FAILED_FILE"
-        echo "===============================================================================================" >> "$FAILED_FILE"
-        printf "%-3s %-25s %-15s %-50s\n" "ID" "Instance" "Runtime (s)" "Failure Reason" >> "$FAILED_FILE"
-        echo "===============================================================================================" >> "$FAILED_FILE"
+        echo "==========================================================================================================" >> "$FAILED_FILE"
+        printf "%-3s %-25s %-8s %-15s %-50s\n" "ID" "Instance" "Bin Vars" "Runtime (s)" "Failure Reason" >> "$FAILED_FILE"
+        echo "==========================================================================================================" >> "$FAILED_FILE"
 
         # CSV header
         echo "TaskID,Instance,SolutionFound,TotalTime,FPIterations,FWIterations,RestartsCycles,RestartsFixed,Objective,Gap,FailureReason,FailureType,ProjectionNorm,FWVariant,LineSearch,RoundingThreshold" > "$CSV_FILE"
@@ -95,7 +96,6 @@ for i in "${!NORMS[@]}"; do
         memory_failure_count=0
         numerical_error_count=0
         other_failure_count=0
-        fp_iterationlimit_count=0
 
         # Statistics arrays
         declare -a found_times=()
@@ -156,13 +156,12 @@ for i in "${!NORMS[@]}"; do
             # Check for restart limit (both cycle and fixed-point)
             restart_limit=$(grep -qE "Maximum (cycle|fixed-point) restarts.*reached, stopping" "$output_file" && echo "yes" || echo "")
 
-            # Check for FP iteration limit
-            fp_iterationlimit=$(grep -q "Maximum FP iterations" "$output_file" && echo "yes" || echo "")
-
             # Check for FW infeasibility
             fw_infeasible=$(grep -q "FrankWolfe return infeasible solution!" "$output_file" && echo "yes" || echo "")
 
             # Extract performance metrics
+            binary_vars=$(grep "Binary variables:" "$output_file" | tail -1 | awk '{print $NF}')
+            INSTANCE_BINVARS["$instance_name"]="$binary_vars"
             total_time=$(grep "Total time:" "$output_file" | tail -1 | awk '{print $3}')
             fw_time=$(grep "FW time:" "$output_file" | tail -1 | awk '{print $3}')
             fp_iterations=$(grep "FP iterations:" "$output_file" | tail -1 | awk '{print $NF}')
@@ -196,7 +195,7 @@ for i in "${!NORMS[@]}"; do
                 failed_count=$((failed_count + 1))
                 scip_timelimit_count=$((scip_timelimit_count + 1))
                 runtime_display="${total_time:-N/A}"
-                printf "%-3s %-25s %-15s %-50s\n" "$task_id" "$instance_name" "$runtime_display" "SCIP time limit (${DEF_SCIP_TIME_LIMIT}s)" >> "$FAILED_FILE"
+                printf "%-3s %-25s %-8s %-15s %-50s\n" "$task_id" "$instance_name" "$binary_vars" "$runtime_display" "SCIP time limit (${DEF_SCIP_TIME_LIMIT}s)" >> "$FAILED_FILE"
 
             # Priority 2: FW time limit
             elif [ -n "$fw_timelimit" ]; then
@@ -205,7 +204,7 @@ for i in "${!NORMS[@]}"; do
                 failed_count=$((failed_count + 1))
                 fw_timelimit_count=$((fw_timelimit_count + 1))
                 runtime_display="${total_time:-N/A}"
-                printf "%-3s %-25s %-15s %-50s\n" "$task_id" "$instance_name" "$runtime_display" "FW time limit (${DEF_FW_TIME_LIMIT}s)" >> "$FAILED_FILE"
+                printf "%-3s %-25s %-8s %-15s %-50s\n" "$task_id" "$instance_name" "$binary_vars" "$runtime_display" "FW time limit (${DEF_FW_TIME_LIMIT}s)" >> "$FAILED_FILE"
 
             # Priority 3: Solution found
             elif [ "$solution_found" = "true" ]; then
@@ -214,8 +213,8 @@ for i in "${!NORMS[@]}"; do
                 found_fw_iters+=("$fw_iterations")
                 found_fp_iters+=("$fp_iterations")
                 found_restarts+=("$restarts_cycles")
-                printf "%-3s %-25s %-12s %-10s %-10s %-10s %-10s %-12s %-8s\n" \
-                    "$task_id" "$instance_name" "$total_time" "$fp_iterations" "$fw_iterations" "$restarts_cycles" "$restarts_fixed" "$objective" "$gap" >> "$FOUND_FILE"
+                printf "%-3s %-25s %-8s %-12s %-10s %-10s %-10s %-10s %-12s %-8s\n" \
+                    "$task_id" "$instance_name" "$binary_vars" "$total_time" "$fp_iterations" "$fw_iterations" "$restarts_cycles" "$restarts_fixed" "$objective" "$gap" >> "$FOUND_FILE"
 
             # Priority 4: FW returns infeasible
             elif [ -n "$fw_infeasible" ]; then
@@ -224,7 +223,7 @@ for i in "${!NORMS[@]}"; do
                 failed_count=$((failed_count + 1))
                 fw_infeasible_count=$((fw_infeasible_count + 1))
                 runtime_display="${total_time:-N/A}"
-                printf "%-3s %-25s %-15s %-50s\n" "$task_id" "$instance_name" "$runtime_display" "FW returns infeasible solution" >> "$FAILED_FILE"
+                printf "%-3s %-25s %-8s %-15s %-50s\n" "$task_id" "$instance_name" "$binary_vars" "$runtime_display" "FW returns infeasible solution" >> "$FAILED_FILE"
 
             # Priority 5: Restart limit
             elif [ -n "$restart_limit" ]; then
@@ -233,25 +232,16 @@ for i in "${!NORMS[@]}"; do
                 failed_count=$((failed_count + 1))
                 restart_limit_count=$((restart_limit_count + 1))
                 runtime_display="${total_time:-N/A}"
-                printf "%-3s %-25s %-15s %-50s\n" "$task_id" "$instance_name" "$runtime_display" "Maximum restarts reached" >> "$FAILED_FILE"
+                printf "%-3s %-25s %-8s %-15s %-50s\n" "$task_id" "$instance_name" "$binary_vars" "$runtime_display" "Maximum restarts reached" >> "$FAILED_FILE"
 
-            # Priority 6: FP iteration limit
-            elif [ -n "$fp_iterationlimit" ]; then
-                failure_reason="FP_ITERATION_LIMIT (max FP iterations reached)"
-                failure_type="FP_ITERATION_LIMIT"
-                failed_count=$((failed_count + 1))
-                fp_iterationlimit_count=$((fp_iterationlimit_count + 1))
-                runtime_display="${total_time:-N/A}"
-                printf "%-3s %-25s %-15s %-50s\n" "$task_id" "$instance_name" "$runtime_display" "Maximum FP iterations reached" >> "$FAILED_FILE"
-
-            # Priority 7: Unknown
+            # Priority 6: Unknown
             else
                 failure_reason="UNKNOWN_ERROR"
                 failure_type="UNKNOWN"
                 failed_count=$((failed_count + 1))
                 other_failure_count=$((other_failure_count + 1))
                 runtime_display="${total_time:-N/A}"
-                printf "%-3s %-25s %-15s %-50s\n" "$task_id" "$instance_name" "$runtime_display" "Unknown error" >> "$FAILED_FILE"
+                printf "%-3s %-25s %-8s %-15s %-50s\n" "$task_id" "$instance_name" "$binary_vars" "$runtime_display" "Unknown error" >> "$FAILED_FILE"
             fi
 
             # Write to individual CSV
@@ -261,8 +251,9 @@ for i in "${!NORMS[@]}"; do
             echo "${task_id},${instance_name},${solution_found},${total_time},${fp_iterations},${fw_iterations},${restarts_cycles},${restarts_fixed},${objective},${gap},${failure_reason},${failure_type},${projection_norm},${fw_variant},${line_search},${rounding_threshold}" >> "$COMBINED_CSV"
 
             # Write to detailed file
-            echo "Instance: ${instance_name}" >> "$DETAILED_FILE"
-            echo "  Solution found: ${solution_found}" >> "$DETAILED_FILE"
+            echo "Instance: ${instance_name} (ID: ${task_id})" >> "$DETAILED_FILE"
+            echo "  Binary variables: ${binary_vars}" >> "$DETAILED_FILE"
+            echo "  Solution found:   ${solution_found}" >> "$DETAILED_FILE"
 
             if [ "$solution_found" = "true" ] || [ "$failure_type" = "RESTART_LIMIT" ] || [ "$failure_type" = "FW_TIMELIMIT" ]; then
                 echo "  Total time: ${total_time}s" >> "$DETAILED_FILE"
@@ -326,7 +317,6 @@ for i in "${!NORMS[@]}"; do
         echo "  - Due to FW time limit:    $fw_timelimit_count" >> "$SUMMARY_FILE"
         echo "  - Due to restart limit:    $restart_limit_count" >> "$SUMMARY_FILE"
         echo "  - Due to FW infeasibility: $fw_infeasible_count" >> "$SUMMARY_FILE"
-        echo "  - Due to FP iter limit:    $fp_iterationlimit_count" >> "$SUMMARY_FILE"
         echo "  - Due to other reasons:    $other_failure_count" >> "$SUMMARY_FILE"
         echo "" >> "$SUMMARY_FILE"
 
@@ -385,6 +375,15 @@ overall_rate=$(awk -v s="$grand_success" -v t="$grand_total" \
     'BEGIN {if(t>0) printf "%.1f", (s/t)*100; else print "0.0"}')
 echo "--------------------------------------------------------------------------------------"
 printf "%-55s %7d %7d %7d %7s\n" "TOTAL" "$grand_success" "$grand_failed" "$grand_total" "$overall_rate"
+echo ""
+echo "INSTANCE BINARY VARIABLE COUNTS"
+echo "------------------------------------"
+printf "%-40s %s\n" "Instance" "Bin Vars"
+echo "------------------------------------"
+for inst in $(echo "${!INSTANCE_BINVARS[@]}" | tr ' ' '\n' | sort); do
+    printf "%-40s %s\n" "$inst" "${INSTANCE_BINVARS[$inst]}"
+done
+echo "------------------------------------"
 } | tee "$BENCHMARK_SUMMARY"
 
 echo ""
