@@ -113,7 +113,7 @@ function set_verbosity!(model::JuMP.Model, level::Int)
 end
 
 function minimal_setup(;
-    time_limit=DEF_SCIP_TIME_LIMIT,
+    time_limit=DEF_SCIP_PRESOLVE_LIMIT,
     node_limit=1,
     verbosity=5
 )

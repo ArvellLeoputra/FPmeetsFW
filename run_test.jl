@@ -4,14 +4,14 @@ include("helper.jl")
 include("fpfwheur.jl")
 include("lmo_builder.jl")
 
-function mps_test_model(filename::String, projection_norm::Symbol, rounding_threshold::Float64, fw_variant::Symbol, line_search::Symbol)
-    model = minimal_setup(verbosity=3)
+function mps_test_model(filename::String, projection_norm::Symbol, rounding_threshold::Float64, fw_variant::Symbol, line_search::Symbol, global_start_time::Float64)
+    model = minimal_setup(verbosity=0)
     backend = JuMP.unsafe_backend(model)
     scip = backend.inner
 
     SCIP.SCIPreadProb(scip, filename, C_NULL)
 
-    heur = FPFWHeuristic(0, nothing, projection_norm, rounding_threshold, fw_variant, line_search)
+    heur = FPFWHeuristic(0, nothing, projection_norm, rounding_threshold, fw_variant, line_search, global_start_time)
     SCIP.include_heuristic(
         backend,
         heur,
@@ -76,7 +76,7 @@ println("Line search: $line_search")
 println("="^80 * "\n")
 
 start_time = time()
-result = mps_test_model(filename, projection_norm, rounding_threshold, fw_variant, line_search)
+result = mps_test_model(filename, projection_norm, rounding_threshold, fw_variant, line_search, start_time)
 total_time = time() - start_time
 
 println("\n" * "="^80)
@@ -84,6 +84,6 @@ println("FINAL RESULT")
 println("="^80)
 println("Status:       $(result.status)")
 println("Solutions:    $(result.nsols)")
-println("Objective:    $(round(result.objective, digits=4))")
+println("Objective:    $(result.objective === nothing ? nothing : round(result.objective, digits=4))")
 println("Total time:   $(round(total_time, digits=2)) seconds")
 println("="^80)

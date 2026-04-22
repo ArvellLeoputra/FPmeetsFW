@@ -30,12 +30,14 @@ function SCIP.find_primal_solution(
         return (SCIP.SCIP_OKAY, SCIP.SCIP_DIDNOTRUN)
     end
 
+    SCIP.SCIPsetRealParam(scip, "limits/time", DEF_GLOBAL_TIME_LIMIT)
+
     if DEF_RANDOM_SEED !== nothing
         Random.seed!(DEF_RANDOM_SEED)
     end
 
     stats = FPFWStats()
-    total_start_time = time()
+    heur_start_time = time()
 
     nvars = SCIP.SCIPgetNLPCols(scip)
     nrows = SCIP.SCIPgetNLPRows(scip)
@@ -200,12 +202,11 @@ function SCIP.find_primal_solution(
         stats.fp_iterations = iter
 
         # Check time limit
-        elapsed = time() - total_start_time
-        if elapsed > DEF_FW_TIME_LIMIT
-            println("FW time limit reached ($(round(elapsed, digits=2))s > $(DEF_FW_TIME_LIMIT)s)")
+        elapsed = time() - heur.global_start_time
+        if elapsed > DEF_GLOBAL_TIME_LIMIT
+            println("Global time limit reached ($(round(elapsed, digits=2))s > $(DEF_GLOBAL_TIME_LIMIT)s)")
             break
         end
-        remaining_time = DEF_FW_TIME_LIMIT - elapsed
 
         # Step 1: Rounding LP feasible solution with custom threshold
         x_round = round_with_threshold(x, binary, heur.rounding_threshold)
@@ -272,7 +273,7 @@ function SCIP.find_primal_solution(
         end
 
         # Step 2: Projection using Frank-Wolfe
-        # Line search selection
+        remaining_time = DEF_GLOBAL_TIME_LIMIT - (time() - heur.global_start_time)
         fw_start = time()
         x_new, _ = call_fw_variant(
             heur.fw_variant,
@@ -291,6 +292,12 @@ function SCIP.find_primal_solution(
 
         fw_iters = length(fw_traj)
         stats.fw_iterations += fw_iters
+
+        # Check time limit after FW returns (may have timed out mid-run)
+        if time() - heur.global_start_time > DEF_GLOBAL_TIME_LIMIT
+            println("Global time limit reached")
+            break
+        end
 
         if DEBUG_VERBOSE
             for (t, xk, fk) in fw_traj
@@ -395,23 +402,19 @@ function SCIP.find_primal_solution(
     end
 
     # Print final summary
-    total_time = time() - total_start_time
+    total_time = time() - heur_start_time
     stats.total_time = total_time
     println("\n" * "="^80)
     println("FPFW HEURISTIC SUMMARY")
     println("="^80)
     println("Binary variables:  $(length(binary))")
-    println("Total time:        $(round(total_time, digits=2)) seconds")
+    println("Total heur time:   $(round(total_time, digits=2)) seconds")
     println("FP iterations:     $(stats.fp_iterations)")
     println("FW iterations:     $(stats.fw_iterations)")
     println("FW time:           $(round(stats.fw_time, digits=2)) seconds")
     println("Restarts (cycles): $(stats.restart_cycles)")
     println("Restarts (fixed):  $(stats.restart_fixedpoint)")
     println("Solution found:    $(stats.solution_found)")
-
-    if stats.solution_found
-        println("Found at iter:     $(stats.iter_found_solution)")
-    end
 
     if stats.infeasible_exit
         println("Exit reason:       infeasible FW solution")

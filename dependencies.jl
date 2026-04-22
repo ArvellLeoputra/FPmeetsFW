@@ -14,6 +14,7 @@ mutable struct FPFWHeuristic <: SCIP.Heuristic
     rounding_threshold::Float64
     fw_variant::Symbol      # :vanilla, :away, :blended_pairwise, :blended
     line_search::Symbol     # :agnostic, :backtracking, :secant, :adaptive
+    global_start_time::Float64
 end
 
 mutable struct FPFWStats
@@ -41,13 +42,13 @@ const DEF_FW_MAX_ITER = 1000
 # const DEF_FP_MAX_ITER = 100
 
 # Time limit
-const DEF_SCIP_TIME_LIMIT = 480.0
-const DEF_FW_TIME_LIMIT = 300.0
+const DEF_GLOBAL_TIME_LIMIT = 480.0
+const DEF_SCIP_PRESOLVE_LIMIT = 300.0
 
 # Perturbation parameters
 const DEF_PERTURB_FRACTION = 0.2      # Fraction of binary vars to flip when perturbing
 const DEF_FIXEDPOINT_PERTURB = 0.1   # Magnitude of perturbation for fixed-point restarts
-const DEF_MAX_CYCLE_RESTARTS = 100    # Maximum number of cycle restarts
+const DEF_MAX_CYCLE_RESTARTS = 1000    # Maximum number of cycle restarts
 const DEF_MAX_FIXEDPOINT_RESTARTS = 50  # Maximum number of fixed-point restarts
 
 # Random seed for reproducibility; set to nothing to disable
