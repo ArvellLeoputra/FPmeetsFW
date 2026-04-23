@@ -7,8 +7,8 @@ function print_heuristic_summary(
 
     exit_msg = if stats.exit_reason == :time_limit
         "global time limit $(DEF_GLOBAL_TIME_LIMIT)s reached"
-    elseif stats.exit_reason == :cycle_limit
-        "FP cycled $(DEF_MAX_CYCLE_RESTARTS) times without progress"
+    elseif stats.exit_reason == :restart_limit
+        "FP cycled $(DEF_MAX_RESTARTS) times without progress"
     elseif stats.exit_reason == :infeasible_fw
         "FW returned a point outside the feasible polytope (numerical error)"
     elseif stats.exit_reason == :solution_found
@@ -17,6 +17,8 @@ function print_heuristic_summary(
         "integer feasible solution found but rejected by SCIP"
     elseif stats.exit_reason == :scip_time_limit
         "SCIP time limit $(DEF_SCIP_TIME_LIMIT)s exceeded, heuristic never called"
+    elseif stats.exit_reason == :scip_solved                                                                                                                                                                                          
+        "problem solved by SCIP presolve/LP before heuristic was called"
     else
         "unknown exit"
     end
@@ -35,7 +37,7 @@ function print_heuristic_summary(
     println("FP iterations:     $(stats.fp_iterations)")
     println("FW iterations:     $(stats.fw_iterations)")
     println("FW time:           $(round(stats.fw_time, digits=2))s")
-    println("Restarts (cycles): $(stats.restart_cycles)")
+    println("Restarts:          $(stats.restarts)")
     println("Solution found:    $(stats.solution_found)")
     println("Exit reason:       $exit_msg")
     println("="^80 * "\n")

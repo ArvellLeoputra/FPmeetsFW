@@ -221,15 +221,15 @@ function SCIP.find_primal_solution(
         # Cycle detection: check if we've visited this rounded solution before
         h = hash_rounded(x_round, binary)
         if h in rounded_cache
-            stats.restart_cycles += 1
+            stats.restarts += 1
 
-            if stats.restart_cycles >= DEF_MAX_CYCLE_RESTARTS
-                stats.exit_reason = :cycle_limit
+            if stats.restarts >= DEF_MAX_RESTARTS
+                stats.exit_reason = :restart_limit
                 break
             end
 
             if DEBUG_VERBOSE
-                println("Cycle detected at iteration $iter (restart #$(stats.restart_cycles))")
+                println("Cycle detected at iteration $iter (restart #$(stats.restarts))")
                 println("Perturbing:")
             end
 

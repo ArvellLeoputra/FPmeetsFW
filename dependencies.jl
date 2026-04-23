@@ -23,9 +23,9 @@ mutable struct FPFWStats
     fw_time::Float64
     fw_iterations::Int
     fp_iterations::Int
-    restart_cycles::Int
+    restarts::Int
     solution_found::Bool
-    exit_reason::Symbol  # :none, :time_limit, :cycle_limit, :infeasible_fw, :solution_found, :solution_rejected
+    exit_reason::Symbol  # :none, :time_limit, :restart_limit, :infeasible_fw, :solution_found, :solution_rejected, :scip_time_limit, :scip_solved
     iter_found_solution::Union{Nothing, Int}
     lp_objective::Float64
     final_objective::Union{Nothing, Float64}
@@ -46,7 +46,7 @@ const DEF_SCIP_TIME_LIMIT = 300.0
 
 # Perturbation parameters
 const DEF_PERTURB_FRACTION = 0.2   # Fraction of binary vars to flip when cycle detected
-const DEF_MAX_CYCLE_RESTARTS = 1000 # Maximum number of cycle restarts before giving up
+const DEF_MAX_RESTARTS = 1000 # Maximum number of restarts before giving up
 
 # Random seed for reproducibility; set to nothing to disable
 const DEF_RANDOM_SEED::Union{Nothing, Int} = 42

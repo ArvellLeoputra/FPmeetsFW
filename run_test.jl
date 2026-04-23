@@ -45,7 +45,14 @@ function mps_test_model(filename::String, projection_norm::Symbol, rounding_thre
         objective = SCIP.SCIPgetNSols(scip) > 0 ? Float64(SCIP.SCIPgetPrimalbound(scip)) : nothing
         gap = Float64(SCIP.SCIPgetGap(scip))
         stats = FPFWStats()
-        stats.exit_reason = :scip_time_limit
+
+        if SCIP.SCIPgetNSols(scip) > 0
+            stats.solution_found = true
+            stats.exit_reason = :scip_solved
+        else
+            stats.exit_reason = :scip_time_limit
+        end
+        
         print_heuristic_summary(stats, total_time, objective, gap)
     end
 

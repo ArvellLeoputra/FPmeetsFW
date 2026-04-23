@@ -1,18 +1,20 @@
 #!/bin/bash
 
-# Check results for all 28 FP-FW experiment combinations
+# Check results for all FP-FW experiment combinations
 # Generates per-combination result files, combined comparison.csv, and benchmark_summary.txt
 
 BASE_DIR="/home/htc/aleoputra/project/FPmeetsFW"
 
-DEF_FW_TIME_LIMIT=$(grep 'const DEF_FW_TIME_LIMIT' "$BASE_DIR/dependencies.jl" | grep -oE '[0-9]+(\.[0-9]+)?')
+DEF_GLOBAL_TIME_LIMIT=$(grep 'const DEF_GLOBAL_TIME_LIMIT' "$BASE_DIR/dependencies.jl" | grep -oE '[0-9]+(\.[0-9]+)?')
 DEF_SCIP_TIME_LIMIT=$(grep 'const DEF_SCIP_TIME_LIMIT' "$BASE_DIR/dependencies.jl" | grep -oE '[0-9]+(\.[0-9]+)?')
 
 NORMS=("manhattan" "euclidean" "abssmooth" "euclidean" "euclidean" "abssmooth" "abssmooth")
 LINESEARCHES=("agnostic" "agnostic" "agnostic" "adaptive" "secant" "adaptive" "secant")
 VARIANTS=("vanilla" "away" "blended_pairwise" "blended")
+PRESOLVES=("false" "true")
+N_COMBINATIONS=$(( ${#NORMS[@]} * ${#VARIANTS[@]} * ${#PRESOLVES[@]} ))
 
-# Combined CSV and summary across all 28 runs
+# Combined CSV and summary across all runs
 COMBINED_CSV="$BASE_DIR/run/comparison.csv"
 BENCHMARK_SUMMARY="$BASE_DIR/run/benchmark_summary.txt"
 
@@ -28,27 +30,30 @@ grand_failed=0
 grand_total=0
 
 grand_scip_timelimit=0
-grand_fw_timelimit=0
+grand_global_timelimit=0
 grand_restart_limit=0
 grand_fw_infeasible=0
 grand_other=0
 
 # Clean up previous check_all.sh outputs before re-running
-for i in "${!NORMS[@]}"; do
-    for VARIANT in "${VARIANTS[@]}"; do
-        rm -rf "$BASE_DIR/run/${NORMS[$i]}_${VARIANT}_${LINESEARCHES[$i]}/result"
+for PRESOLVE in "${PRESOLVES[@]}"; do
+    for i in "${!NORMS[@]}"; do
+        for VARIANT in "${VARIANTS[@]}"; do
+            rm -rf "$BASE_DIR/run/${NORMS[$i]}_${VARIANT}_${LINESEARCHES[$i]}_presolve_${PRESOLVE}/result"
+        done
     done
 done
 
-CSV_HEADER="ID,Instance,SolutionFound,TotalTime,FPIterations,FWIterations,RestartsCycles,RestartsFixed,Objective,Gap,FailureReason,FailureType,ProjectionNorm,FWVariant,LineSearch,RoundingThreshold"
+CSV_HEADER="ID,Instance,SolutionFound,TotalTime,FPIterations,FWIterations,Restarts,Objective,Gap,FailureReason,FailureType,ProjectionNorm,FWVariant,LineSearch,RoundingThreshold,Presolve"
 echo "$CSV_HEADER" > "$COMBINED_CSV"
 
+for PRESOLVE in "${PRESOLVES[@]}"; do
 for i in "${!NORMS[@]}"; do
     NORM="${NORMS[$i]}"
     LS="${LINESEARCHES[$i]}"
 
     for VARIANT in "${VARIANTS[@]}"; do
-        NAME="${NORM}_${VARIANT}_${LS}"
+        NAME="${NORM}_${VARIANT}_${LS}_presolve_${PRESOLVE}"
 
         OUTPUT_DIR="$BASE_DIR/run/$NAME/output"
         ERROR_DIR="$BASE_DIR/run/$NAME/error"
@@ -66,7 +71,7 @@ for i in "${!NORMS[@]}"; do
         echo "==========================================================" >> "$SUMMARY_FILE"
         echo "" >> "$SUMMARY_FILE"
 
-        rounding_threshold=$(grep "Rounding threshold:" "$(ls "$OUTPUT_DIR"/job_*_*.out 2>/dev/null | head -1)" 2>/dev/null | head -1 | awk '{print $NF}')
+        rounding_threshold=$(grep "Rounding thresh:" "$(ls "$OUTPUT_DIR"/job_*_*.out 2>/dev/null | head -1)" 2>/dev/null | head -1 | awk '{print $NF}')
 
         echo "DETAILED RESULTS" > "$DETAILED_FILE"
         echo "==========================================================" >> "$DETAILED_FILE"
@@ -74,12 +79,13 @@ for i in "${!NORMS[@]}"; do
         echo "  FW variant:         $VARIANT" >> "$DETAILED_FILE"
         echo "  Line search:        $LS" >> "$DETAILED_FILE"
         echo "  Rounding threshold: $rounding_threshold" >> "$DETAILED_FILE"
+        echo "  Presolve:           $PRESOLVE" >> "$DETAILED_FILE"
         echo "==========================================================" >> "$DETAILED_FILE"
         echo "" >> "$DETAILED_FILE"
 
         echo "Test cases with solutions found:" > "$FOUND_FILE"
         echo "====================================================================================================================" >> "$FOUND_FILE"
-        printf "%-3s %-25s %-8s %-12s %-10s %-10s %-10s %-10s %-12s %-8s\n" "ID" "Instance" "Bin Vars" "Time (s)" "FP Iters" "FW Iters" "Rst Cycles" "Rst Fixed" "Objective" "Gap (%)" >> "$FOUND_FILE"
+        printf "%-3s %-25s %-8s %-12s %-10s %-10s %-10s %-12s %-8s\n" "ID" "Instance" "Bin Vars" "Time (s)" "FP Iters" "FW Iters" "Restarts" "Objective" "Gap (%)" >> "$FOUND_FILE"
         echo "====================================================================================================================" >> "$FOUND_FILE"
 
         echo "Failed/Interrupted runs:" > "$FAILED_FILE"
@@ -93,15 +99,11 @@ for i in "${!NORMS[@]}"; do
         # Counters
         total_count=0
         found_count=0
-        not_found_count=0
         failed_count=0
-        slurm_timelimit_count=0
         scip_timelimit_count=0
-        fw_timelimit_count=0
+        global_timelimit_count=0
         restart_limit_count=0
         fw_infeasible_count=0
-        memory_failure_count=0
-        numerical_error_count=0
         other_failure_count=0
 
         # Statistics arrays
@@ -140,31 +142,24 @@ for i in "${!NORMS[@]}"; do
             fi
             fw_variant=$(grep "FW variant:" "$output_file" | head -1 | awk '{print $NF}')
             line_search=$(grep "Line search:" "$output_file" | head -1 | awk '{print $NF}')
-            rounding_threshold=$(grep "Rounding threshold:" "$output_file" | head -1 | awk '{print $NF}')
+            rounding_threshold=$(grep "Rounding thresh:" "$output_file" | head -1 | awk '{print $NF}')
 
-            # No error files locally — skip SLURM/memory/numerical checks
-            slurm_timelimit=""
-            memory_failure=""
-            numerical_error=""
+            # Parse exit reason from summary output
+            exit_reason_str=$(grep "Exit reason:" "$output_file" | tail -1 | sed 's/Exit reason:[[:space:]]*//')
 
-            # Check for SCIP time limit
             scip_timelimit=""
-            scip_status=$(grep "SCIP Status" "$output_file" | grep -i "time limit reached")
-            if [ -n "$scip_status" ]; then
-                scip_timelimit="yes"
-            fi
+            global_timelimit=""
+            restart_limit=""
+            fw_infeasible=""
+            scip_solved=""
 
-            # Check for FW internal time limit
-            fw_timelimit=$(grep -q "FW time limit reached" "$output_file" && echo "yes" || echo "")
-
-            # Check for node limit
-            node_limit=$(grep -q "node limit reached" "$output_file" && echo "yes" || echo "")
-
-            # Check for restart limit (both cycle and fixed-point)
-            restart_limit=$(grep -qE "Maximum (cycle|fixed-point) restarts.*reached, stopping" "$output_file" && echo "yes" || echo "")
-
-            # Check for FW infeasibility
-            fw_infeasible=$(grep -q "FrankWolfe return infeasible solution!" "$output_file" && echo "yes" || echo "")
+            case "$exit_reason_str" in
+                *"SCIP time limit"*)               scip_timelimit="yes" ;;
+                *"global time limit"*)             global_timelimit="yes" ;;
+                *"cycled"*)                        restart_limit="yes" ;;
+                *"outside the feasible polytope"*) fw_infeasible="yes" ;;
+                *"solved by SCIP"*)                scip_solved="yes" ;;
+            esac
 
             # Extract performance metrics
             binary_vars=$(grep "Binary variables:" "$output_file" | tail -1 | awk '{print $NF}')
@@ -173,8 +168,7 @@ for i in "${!NORMS[@]}"; do
             fw_time=$(grep "FW time:" "$output_file" | tail -1 | awk '{print $3}')
             fp_iterations=$(grep "FP iterations:" "$output_file" | tail -1 | awk '{print $NF}')
             fw_iterations=$(grep "FW iterations:" "$output_file" | tail -1 | awk '{print $NF}')
-            restarts_cycles=$(grep "Restarts (cycles):" "$output_file" | tail -1 | awk '{print $NF}')
-            restarts_fixed=$(grep "Restarts (fixed):" "$output_file" | tail -1 | awk '{print $NF}')
+            restarts=$(grep "Restarts:" "$output_file" | tail -1 | awk '{print $NF}')
 
             # Check if solution was found
             solution_found=$(grep "Solution found:" "$output_file" | tail -1 | awk '{print $NF}')
@@ -204,14 +198,14 @@ for i in "${!NORMS[@]}"; do
                 runtime_display="${total_time:-N/A}"
                 printf "%-3s %-25s %-8s %-15s %-50s\n" "$task_id" "$instance_name" "$binary_vars" "$runtime_display" "SCIP time limit (${DEF_SCIP_TIME_LIMIT}s)" >> "$FAILED_FILE"
 
-            # Priority 2: FW time limit
-            elif [ -n "$fw_timelimit" ]; then
-                failure_reason="FW_TIME_LIMIT (${DEF_FW_TIME_LIMIT}s per iteration)"
-                failure_type="FW_TIMELIMIT"
+            # Priority 2: Global time limit
+            elif [ -n "$global_timelimit" ]; then
+                failure_reason="GLOBAL_TIME_LIMIT (${DEF_GLOBAL_TIME_LIMIT}s per iteration)"
+                failure_type="GLOBAL_TIMELIMIT"
                 failed_count=$((failed_count + 1))
-                fw_timelimit_count=$((fw_timelimit_count + 1))
+                global_timelimit_count=$((global_timelimit_count + 1))
                 runtime_display="${total_time:-N/A}"
-                printf "%-3s %-25s %-8s %-15s %-50s\n" "$task_id" "$instance_name" "$binary_vars" "$runtime_display" "FW time limit (${DEF_FW_TIME_LIMIT}s)" >> "$FAILED_FILE"
+                printf "%-3s %-25s %-8s %-15s %-50s\n" "$task_id" "$instance_name" "$binary_vars" "$runtime_display" "Global time limit (${DEF_GLOBAL_TIME_LIMIT}s)" >> "$FAILED_FILE"
 
             # Priority 3: Solution found
             elif [ "$solution_found" = "true" ]; then
@@ -219,9 +213,9 @@ for i in "${!NORMS[@]}"; do
                 found_times+=("$total_time")
                 found_fw_iters+=("$fw_iterations")
                 found_fp_iters+=("$fp_iterations")
-                found_restarts+=("$restarts_cycles")
-                printf "%-3s %-25s %-8s %-12s %-10s %-10s %-10s %-10s %-12s %-8s\n" \
-                    "$task_id" "$instance_name" "$binary_vars" "$total_time" "$fp_iterations" "$fw_iterations" "$restarts_cycles" "$restarts_fixed" "$objective" "$gap" >> "$FOUND_FILE"
+                found_restarts+=("$restarts")
+                printf "%-3s %-25s %-8s %-12s %-10s %-10s %-10s %-12s %-8s\n" \
+                    "$task_id" "$instance_name" "$binary_vars" "$total_time" "$fp_iterations" "$fw_iterations" "$restarts" "$objective" "$gap" >> "$FOUND_FILE"
 
             # Priority 4: FW returns infeasible
             elif [ -n "$fw_infeasible" ]; then
@@ -252,47 +246,27 @@ for i in "${!NORMS[@]}"; do
             fi
 
             # Write to individual CSV
-            echo "${task_id},${instance_name},${solution_found},${total_time},${fp_iterations},${fw_iterations},${restarts_cycles},${restarts_fixed},${objective},${gap},${failure_reason},${failure_type},${projection_norm},${fw_variant},${line_search},${rounding_threshold}" >> "$CSV_FILE"
+            echo "${task_id},${instance_name},${solution_found},${total_time},${fp_iterations},${fw_iterations},${restarts},${objective},${gap},${failure_reason},${failure_type},${projection_norm},${fw_variant},${line_search},${rounding_threshold},${PRESOLVE}" >> "$CSV_FILE"
 
             # Write to combined CSV
-            echo "${task_id},${instance_name},${solution_found},${total_time},${fp_iterations},${fw_iterations},${restarts_cycles},${restarts_fixed},${objective},${gap},${failure_reason},${failure_type},${projection_norm},${fw_variant},${line_search},${rounding_threshold}" >> "$COMBINED_CSV"
+            echo "${task_id},${instance_name},${solution_found},${total_time},${fp_iterations},${fw_iterations},${restarts},${objective},${gap},${failure_reason},${failure_type},${projection_norm},${fw_variant},${line_search},${rounding_threshold},${PRESOLVE}" >> "$COMBINED_CSV"
 
             # Write to detailed file
             echo "Instance: ${instance_name} (ID:${task_id})" >> "$DETAILED_FILE"
             echo "  Binary variables: ${binary_vars}" >> "$DETAILED_FILE"
             echo "  Solution found:   ${solution_found}" >> "$DETAILED_FILE"
             echo "  Total time:       ${total_time}s" >> "$DETAILED_FILE"
+            echo "  FP iterations:    ${fp_iterations}" >> "$DETAILED_FILE"
+            echo "  FW iterations:    ${fw_iterations}" >> "$DETAILED_FILE"
+            echo "  FW time:          ${fw_time}s" >> "$DETAILED_FILE"
+            echo "  Restarts:         ${restarts}" >> "$DETAILED_FILE"
 
             if [ "$solution_found" = "true" ]; then
-                echo "  Objective: ${objective}" >> "$DETAILED_FILE"
-                echo "  Gap: ${gap}%" >> "$DETAILED_FILE"
-                echo "  FP iterations: ${fp_iterations}" >> "$DETAILED_FILE"
-                echo "  FW iterations: ${fw_iterations}" >> "$DETAILED_FILE"
-                echo "  FW time: ${fw_time}s" >> "$DETAILED_FILE"
-                echo "  Restarts (cycles): ${restarts_cycles}" >> "$DETAILED_FILE"
-                echo "  Restarts (fixed): ${restarts_fixed}" >> "$DETAILED_FILE"
-            fi
-
-            if [ "$failure_type" != "SCIP_TIMELIMIT" ] then
-                echo "  Failure reason: ${failure_reason}" >> "$DETAILED_FILE"
-                echo "  Failure type: ${failure_type}" >> "$DETAILED_FILE"
-            fi
-
-            if [ "$failure_type" != "SCIP_TIMELIMIT" ] && [ "$failure_type" != "FW_TIMELIMIT" ]; then
-                echo "  Total time: ${total_time}s" >> "$DETAILED_FILE"
-                echo "  FP iterations: ${fp_iterations}" >> "$DETAILED_FILE"
-                echo "  FW iterations: ${fw_iterations}" >> "$DETAILED_FILE"
-                echo "  Restarts (cycles): ${restarts_cycles}" >> "$DETAILED_FILE"
-                echo "  Restarts (fixed): ${restarts_fixed}" >> "$DETAILED_FILE"
-            fi
-
-            if [ "$solution_found" = "true" ]; then
-                echo "  FW time: ${fw_time}s" >> "$DETAILED_FILE"
-                echo "  Objective: ${objective}" >> "$DETAILED_FILE"
-                echo "  Gap: ${gap}%" >> "$DETAILED_FILE"
+                echo "  Objective:        ${objective}" >> "$DETAILED_FILE"
+                echo "  Gap:              ${gap}%" >> "$DETAILED_FILE"
             else
-                echo "  Failure reason: ${failure_reason}" >> "$DETAILED_FILE"
-                echo "  Failure type: ${failure_type}" >> "$DETAILED_FILE"
+                echo "  Failure reason:   ${failure_reason}" >> "$DETAILED_FILE"
+                echo "  Failure type:     ${failure_type}" >> "$DETAILED_FILE"
             fi
             echo "" >> "$DETAILED_FILE"
         done
@@ -337,7 +311,7 @@ for i in "${!NORMS[@]}"; do
         echo "==========================================================" >> "$SUMMARY_FILE"
         echo "Total failed cases: $failed_count" >> "$SUMMARY_FILE"
         echo "  - Due to SCIP time limit:  $scip_timelimit_count" >> "$SUMMARY_FILE"
-        echo "  - Due to FW time limit:    $fw_timelimit_count" >> "$SUMMARY_FILE"
+        echo "  - Due to global time limit: $global_timelimit_count" >> "$SUMMARY_FILE"
         echo "  - Due to restart limit:    $restart_limit_count" >> "$SUMMARY_FILE"
         echo "  - Due to FW infeasibility: $fw_infeasible_count" >> "$SUMMARY_FILE"
         echo "  - Due to other reasons:    $other_failure_count" >> "$SUMMARY_FILE"
@@ -378,39 +352,40 @@ for i in "${!NORMS[@]}"; do
         grand_failed=$((grand_failed + failed_count))
         grand_total=$((grand_total + total_count))
         grand_scip_timelimit=$((grand_scip_timelimit + scip_timelimit_count))
-        grand_fw_timelimit=$((grand_fw_timelimit + fw_timelimit_count))
+        grand_global_timelimit=$((grand_global_timelimit + global_timelimit_count))
         grand_restart_limit=$((grand_restart_limit + restart_limit_count))
         grand_fw_infeasible=$((grand_fw_infeasible + fw_infeasible_count))
         grand_other=$((grand_other + other_failure_count))
     done
+done
 done
 
 # ── Generate benchmark_summary.txt ───────────────────────────────────────────
 {
 echo "FPFW Benchmark Summary"
 echo "Generated: $(date)"
-echo "Instances: $(( grand_total / 28 )) per combination | Total combinations: 28"
+echo "Instances: $(( grand_total / N_COMBINATIONS )) per combination | Total combinations: $N_COMBINATIONS"
 echo ""
-printf "%-55s %7s %7s %7s %7s\n" "Combination (norm_variant_linesearch)" "Success" "Failed" "Total" "Rate(%)"
-echo "--------------------------------------------------------------------------------------"
+printf "%-65s %7s %7s %7s %7s\n" "Combination (norm_variant_linesearch_presolve)" "Success" "Failed" "Total" "Rate(%)"
+echo "------------------------------------------------------------------------------------------------"
 for j in "${!SUMMARY_NAMES[@]}"; do
     rate=$(awk -v s="${SUMMARY_SUCCESS[$j]}" -v t="${SUMMARY_TOTAL[$j]}" \
         'BEGIN {if(t>0) printf "%.1f", (s/t)*100; else print "0.0"}')
-    printf "%-55s %7d %7d %7d %7s\n" \
+    printf "%-65s %7d %7d %7d %7s\n" \
         "${SUMMARY_NAMES[$j]}" "${SUMMARY_SUCCESS[$j]}" "${SUMMARY_FAILED[$j]}" "${SUMMARY_TOTAL[$j]}" "$rate"
 done
 overall_rate=$(awk -v s="$grand_success" -v t="$grand_total" \
     'BEGIN {if(t>0) printf "%.1f", (s/t)*100; else print "0.0"}')
-echo "--------------------------------------------------------------------------------------"
-printf "%-55s %7d %7d %7d %7s\n" "TOTAL" "$grand_success" "$grand_failed" "$grand_total" "$overall_rate"
+echo "------------------------------------------------------------------------------------------------"
+printf "%-65s %7d %7d %7d %7s\n" "TOTAL" "$grand_success" "$grand_failed" "$grand_total" "$overall_rate"
 echo ""
 echo "FAILURE BREAKDOWN (across all combinations)"
 echo "--------------------------------------------"
-echo "  FW time limit:    $grand_fw_timelimit"
-echo "  SCIP time limit:  $grand_scip_timelimit"
-echo "  Restart limit:    $grand_restart_limit"
-echo "  FW infeasible:    $grand_fw_infeasible"
-echo "  Unknown:          $grand_other"
+echo "  Global time limit: $grand_global_timelimit"
+echo "  SCIP time limit:   $grand_scip_timelimit"
+echo "  Restart limit:     $grand_restart_limit"
+echo "  FW infeasible:     $grand_fw_infeasible"
+echo "  Unknown:           $grand_other"
 echo ""
 echo "INSTANCE BINARY VARIABLE COUNTS"
 echo "------------------------------------"
@@ -423,6 +398,6 @@ echo "------------------------------------"
 } | tee "$BENCHMARK_SUMMARY"
 
 echo ""
-echo "All 28 combinations checked."
+echo "All $N_COMBINATIONS combinations checked."
 echo "Combined CSV:       $COMBINED_CSV"
 echo "Benchmark summary:  $BENCHMARK_SUMMARY"

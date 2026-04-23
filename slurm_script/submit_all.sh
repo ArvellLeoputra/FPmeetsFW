@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Submit all 28 FP-FW experiment combinations (7 pairs of norm and linesearch x 4 FW variants)
+# Submit all FP-FW experiment combinations (7 pairs of norm and linesearch x 4 FW variants x 2 presolve settings)
 # Each job runs as an array over all instances in selection_benchmark
 
 PROJECT_DIR="/home/htc/aleoputra/project/FPmeetsFW"
@@ -16,29 +16,31 @@ echo "Found $NUM_INSTANCES instances in $INSTANCE_DIR"
 NORMS=("manhattan" "euclidean" "abssmooth" "euclidean" "euclidean" "abssmooth" "abssmooth")
 LINESEARCHES=("agnostic" "agnostic" "agnostic" "adaptive" "secant" "adaptive" "secant")
 VARIANTS=("vanilla" "away" "blended_pairwise" "blended")
+PRESOLVES=("false" "true")
 
-for i in "${!NORMS[@]}"; do
-    NORM="${NORMS[$i]}"
-    LS="${LINESEARCHES[$i]}"
+for PRESOLVE in "${PRESOLVES[@]}"; do
+    for i in "${!NORMS[@]}"; do
+        NORM="${NORMS[$i]}"
+        LS="${LINESEARCHES[$i]}"
 
-    for VARIANT in "${VARIANTS[@]}"; do
-        NAME="${NORM}_${VARIANT}_${LS}"
+        for VARIANT in "${VARIANTS[@]}"; do
+            NAME="${NORM}_${VARIANT}_${LS}_presolve_${PRESOLVE}"
 
-        OUT_DIR="$PROJECT_DIR/run/$NAME/output"
-        ERR_DIR="$PROJECT_DIR/run/$NAME/error"
-        rm -rf "$OUT_DIR" "$ERR_DIR"
-        mkdir -p "$OUT_DIR" "$ERR_DIR"
+            OUT_DIR="$PROJECT_DIR/run/$NAME/output"
+            ERR_DIR="$PROJECT_DIR/run/$NAME/error"
+            rm -rf "$OUT_DIR" "$ERR_DIR"
+            mkdir -p "$OUT_DIR" "$ERR_DIR"
 
-        sbatch <<EOF || { echo "ERROR: sbatch failed for $NAME"; continue; }
+            sbatch <<EOF || { echo "ERROR: sbatch failed for $NAME"; continue; }
 #!/bin/bash
-#SBATCH --job-name=fpfw_$NAME
+#SBATCH --job-name=fpfw_${NORM}_${VARIANT}_${LS}_${PRESOLVE}
 #SBATCH --time=10:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=32G
+#SBATCH --mem=16G
 #SBATCH --partition=big
-#SBATCH --constraint=Gold6338
+#SBATCH --constraint=virtual
 #SBATCH --array=1-${NUM_INSTANCES}
 #SBATCH --output=$OUT_DIR/job_%A_%a.out
 #SBATCH --error=$ERR_DIR/job_%A_%a.err
@@ -54,11 +56,12 @@ INSTANCE_PATH="$INSTANCE_DIR/\$INSTANCE"
 echo "Running instance: \$INSTANCE_PATH"
 echo "SLURM task ID: \${SLURM_ARRAY_TASK_ID}"
 
-julia --project $PROJECT_DIR/run_test.jl "\$INSTANCE_PATH" $NORM 0.5 $VARIANT $LS
+julia --project=$PROJECT_DIR $PROJECT_DIR/run_test.jl "\$INSTANCE_PATH" $NORM 0.5 $VARIANT $LS $PRESOLVE
 EOF
 
-        echo "Submitted: $NAME"
+            echo "Submitted: $NAME"
+        done
     done
 done
 
-echo "All $((${#NORMS[@]} * ${#VARIANTS[@]})) jobs submitted (${NUM_INSTANCES} instances each)."
+echo "All $((${#NORMS[@]} * ${#VARIANTS[@]} * ${#PRESOLVES[@]})) jobs submitted (${NUM_INSTANCES} instances each)."
