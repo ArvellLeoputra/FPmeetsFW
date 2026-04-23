@@ -4,14 +4,32 @@ include("helper.jl")
 include("fpfwheur.jl")
 include("lmo_builder.jl")
 
-function mps_test_model(filename::String, projection_norm::Symbol, rounding_threshold::Float64, fw_variant::Symbol, line_search::Symbol, global_start_time::Float64)
-    model = minimal_setup(verbosity=0)
+function mps_test_model(filename::String, projection_norm::Symbol, rounding_threshold::Float64, fw_variant::Symbol, line_search::Symbol, presolve::Bool, global_start_time::Float64)
+    model = minimal_setup(presolve=presolve)
     backend = JuMP.unsafe_backend(model)
     scip = backend.inner
 
     SCIP.SCIPreadProb(scip, filename, C_NULL)
 
-    heur = FPFWHeuristic(0, nothing, projection_norm, rounding_threshold, fw_variant, line_search, global_start_time)
+    # Count original binary variables from MPS before any solving/presolving
+    nvars_orig = SCIP.SCIPgetNOrigVars(scip)
+    orig_vars = unsafe_wrap(Vector{Ptr{SCIP.SCIP_VAR}}, SCIP.SCIPgetOrigVars(scip), nvars_orig)
+    n_orig_binary = sum(SCIP.SCIPvarGetType(orig_vars[j]) == SCIP.SCIP_VARTYPE_BINARY for j in 1:nvars_orig)
+
+    println("="^80)
+    println("RUN INFO")
+    println("="^80)
+    println("Instance:          $(basename(filename))")
+    println("Total variables:   $nvars_orig")
+    println("Binary variables:  $n_orig_binary")
+    println("Projection norm:   $projection_norm")
+    println("Rounding thresh:   $rounding_threshold")
+    println("FW variant:        $fw_variant")
+    println("Line search:       $line_search")
+    println("Presolve:          $presolve")
+    println("="^80)
+
+    heur = FPFWHeuristic(n_orig_binary, 0, nothing, projection_norm, rounding_threshold, fw_variant, line_search, global_start_time)
     SCIP.include_heuristic(
         backend,
         heur,
@@ -22,16 +40,20 @@ function mps_test_model(filename::String, projection_norm::Symbol, rounding_thre
 
     SCIP.SCIPsolve(scip)
 
-    # Return solution info
-    status = SCIP.SCIPgetStatus(scip)
-    nsols = SCIP.SCIPgetNSols(scip)
-    obj = nsols > 0 ? SCIP.SCIPgetPrimalbound(scip) : nothing
+    if heur.called == 0
+        total_time = time() - global_start_time
+        objective = SCIP.SCIPgetNSols(scip) > 0 ? Float64(SCIP.SCIPgetPrimalbound(scip)) : nothing
+        gap = Float64(SCIP.SCIPgetGap(scip))
+        stats = FPFWStats()
+        stats.exit_reason = :scip_time_limit
+        print_heuristic_summary(stats, total_time, objective, gap)
+    end
 
-    return (status=status, nsols=nsols, objective=obj)
+    return nothing
 end
 
 if length(ARGS) < 1
-    error("Usage: julia --project run_test.jl <filename.mps> [euclidean|manhattan|abssmooth] [threshold] [vanilla|away|blended_pairwise|blended] [agnostic|backtracking|secant|adaptive]")
+    error("Usage: julia --project run_test.jl <filename.mps> [euclidean|manhattan|abssmooth] [threshold] [vanilla|away|blended_pairwise|blended] [agnostic|backtracking|secant|adaptive] [true|false]")
 end
 
 filename = ARGS[1]
@@ -67,23 +89,11 @@ if line_search ∉ valid_line_searches
     error("Invalid line search: $line_search. Must be one of: $valid_line_searches")
 end
 
-println("\n" * "="^80)
-println("Loading instance: $filename")
-println("Projection norm: $projection_norm")
-println("Rounding threshold: $rounding_threshold")
-println("FW variant: $fw_variant")
-println("Line search: $line_search")
-println("="^80 * "\n")
+if projection_norm == :manhattan && line_search ∈ (:adaptive, :secant)
+    error("manhattan norm requires a smooth objective — use agnostic or backtracking line search instead")
+end
+
+presolve = length(ARGS) >= 6 ? parse(Bool, ARGS[6]) : DEF_PRESOLVE
 
 start_time = time()
-result = mps_test_model(filename, projection_norm, rounding_threshold, fw_variant, line_search, start_time)
-total_time = time() - start_time
-
-println("\n" * "="^80)
-println("FINAL RESULT")
-println("="^80)
-println("Status:       $(result.status)")
-println("Solutions:    $(result.nsols)")
-println("Objective:    $(result.objective === nothing ? nothing : round(result.objective, digits=4))")
-println("Total time:   $(round(total_time, digits=2)) seconds")
-println("="^80)
+mps_test_model(filename, projection_norm, rounding_threshold, fw_variant, line_search, presolve, start_time)

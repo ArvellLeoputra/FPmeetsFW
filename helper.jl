@@ -1,3 +1,46 @@
+function print_heuristic_summary(
+    stats::FPFWStats,
+    total_time::Float64,
+    objective::Union{Float64, Nothing},
+    gap::Float64
+)::Nothing
+
+    exit_msg = if stats.exit_reason == :time_limit
+        "global time limit $(DEF_GLOBAL_TIME_LIMIT)s reached"
+    elseif stats.exit_reason == :cycle_limit
+        "FP cycled $(DEF_MAX_CYCLE_RESTARTS) times without progress"
+    elseif stats.exit_reason == :infeasible_fw
+        "FW returned a point outside the feasible polytope (numerical error)"
+    elseif stats.exit_reason == :solution_found
+        "integer feasible solution accepted by SCIP at iteration $(stats.iter_found_solution)"
+    elseif stats.exit_reason == :solution_rejected
+        "integer feasible solution found but rejected by SCIP"
+    elseif stats.exit_reason == :scip_time_limit
+        "SCIP time limit $(DEF_SCIP_TIME_LIMIT)s exceeded, heuristic never called"
+    else
+        "unknown exit"
+    end
+
+    heur_time_str = stats.heur_time == 0.0 ? "N/A" : "$(round(stats.heur_time, digits=2))s"  # 0.0 means heuristic never ran
+    obj_str       = objective === nothing ? "N/A" : "$(round(objective, digits=4))"
+    gap_str       = isinf(gap) || gap > 1e15 ? "Infinite" : @sprintf("%.2f %%", gap * 100)
+
+    println("\n" * "="^80)
+    println("FPFW HEURISTIC SUMMARY")
+    println("="^80)
+    println("Objective:         $obj_str")
+    println("Gap:               $gap_str")
+    println("Total time:        $(round(total_time, digits=2))s")
+    println("Total heur time:   $heur_time_str")
+    println("FP iterations:     $(stats.fp_iterations)")
+    println("FW iterations:     $(stats.fw_iterations)")
+    println("FW time:           $(round(stats.fw_time, digits=2))s")
+    println("Restarts (cycles): $(stats.restart_cycles)")
+    println("Solution found:    $(stats.solution_found)")
+    println("Exit reason:       $exit_msg")
+    println("="^80 * "\n")
+end
+
 # Helper function to check constraint feasibility
 function check_feasibility(
     scip::Ptr{SCIP.SCIP_},

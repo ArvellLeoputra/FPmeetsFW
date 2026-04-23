@@ -99,7 +99,7 @@ function disable_root_node_propagation!(model::JuMP.Model)
     set_param(model, "propagating/maxroundsroot", 0)
 end
 
-function disable_strong_branching_lookahead!(model::JuMP.AbstractModel)
+function disable_strong_branching_lookahead!(model::JuMP.Model)
     set_param(model, "branching/relpscost/initcand", 0)
     set_param(model, "branching/relpscost/sbiterofs", 0)
     set_param(model, "branching/relpscost/sbiterquot", 0)
@@ -113,22 +113,23 @@ function set_verbosity!(model::JuMP.Model, level::Int)
 end
 
 function minimal_setup(;
-    time_limit=DEF_SCIP_PRESOLVE_LIMIT,
+    time_limit=DEF_SCIP_TIME_LIMIT,
     node_limit=1,
-    verbosity=5
+    verbosity=0,
+    presolve=false
 )
     model = Model(SCIP.Optimizer)
 
     disable_all_heuristics!(model)
-    disable_separators!(model)
     disable_cuts!(model)
-    disable_presolving!(model)
     disable_root_node_propagation!(model)
-    disable_strong_branching_lookahead!(model)
+
+    if !presolve                                                                                                                                                                                                                  
+        disable_presolving!(model)                                                                                                                                                                                              
+    end
 
     set_verbosity!(model, verbosity)
     set_limits!(model, time_limit=time_limit, node_limit=node_limit)
-    set_param(model, "separating/maxroundsroot", 1)
 
     return model
 end
