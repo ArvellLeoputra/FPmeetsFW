@@ -35,6 +35,11 @@ grand_restart_limit=0
 grand_fw_infeasible=0
 grand_other=0
 
+grand_found_binary=0
+grand_found_ginteger=0
+grand_failed_binary=0
+grand_failed_ginteger=0
+
 # Clean up previous check_all.sh outputs before re-running
 for PRESOLVE in "${PRESOLVES[@]}"; do
     for i in "${!NORMS[@]}"; do
@@ -113,6 +118,10 @@ for i in "${!NORMS[@]}"; do
         restart_limit_count=0
         fw_infeasible_count=0
         other_failure_count=0
+        found_binary=0
+        found_ginteger=0
+        failed_binary=0
+        failed_ginteger=0
 
         # Statistics arrays
         declare -a found_times=()
@@ -202,6 +211,7 @@ for i in "${!NORMS[@]}"; do
             # Determine status and failure reason
             failure_reason="None"
             failure_type="None"
+            this_was_found=0
 
             # Priority 1: SCIP time limit
             if [ -n "$scip_timelimit" ]; then
@@ -224,6 +234,7 @@ for i in "${!NORMS[@]}"; do
             # Priority 3: Solution found
             elif [ "$solution_found" = "true" ]; then
                 found_count=$((found_count + 1))
+                this_was_found=1
                 found_times+=("$total_time")
                 found_fw_iters+=("$fw_iterations")
                 found_fp_iters+=("$fp_iterations")
@@ -257,6 +268,13 @@ for i in "${!NORMS[@]}"; do
                 other_failure_count=$((other_failure_count + 1))
                 runtime_display="${total_time:-N/A}"
                 printf "%-3s %-25s %-8s %-15s %-50s\n" "$task_id" "$instance_name" "$binary_vars" "$runtime_display" "Unknown error" >> "$FAILED_FILE"
+            fi
+
+            # Classify by instance type (binary-only vs general integer)
+            if [ "${integer_vars:-0}" -gt 0 ] 2>/dev/null; then
+                [ "$this_was_found" = "1" ] && found_ginteger=$((found_ginteger + 1)) || failed_ginteger=$((failed_ginteger + 1))
+            else
+                [ "$this_was_found" = "1" ] && found_binary=$((found_binary + 1)) || failed_binary=$((failed_binary + 1))
             fi
 
             # Write to individual CSV
@@ -327,6 +345,12 @@ for i in "${!NORMS[@]}"; do
         echo "Failed/Interrupted: $failed_count ($(awk -v f="$failed_count" -v t="$total_count" 'BEGIN {if(t>0) printf "%.2f", (f/t)*100; else print "0.00"}')%)" >> "$SUMMARY_FILE"
         echo "" >> "$SUMMARY_FILE"
 
+        echo "BREAKDOWN BY INSTANCE TYPE" >> "$SUMMARY_FILE"
+        echo "==========================================================" >> "$SUMMARY_FILE"
+        echo "Binary-only (20):      found=$found_binary  failed=$failed_binary" >> "$SUMMARY_FILE"
+        echo "General integer (5):   found=$found_ginteger  failed=$failed_ginteger" >> "$SUMMARY_FILE"
+        echo "" >> "$SUMMARY_FILE"
+
         echo "FAILURE BREAKDOWN" >> "$SUMMARY_FILE"
         echo "==========================================================" >> "$SUMMARY_FILE"
         echo "Total failed cases: $failed_count" >> "$SUMMARY_FILE"
@@ -376,6 +400,10 @@ for i in "${!NORMS[@]}"; do
         grand_restart_limit=$((grand_restart_limit + restart_limit_count))
         grand_fw_infeasible=$((grand_fw_infeasible + fw_infeasible_count))
         grand_other=$((grand_other + other_failure_count))
+        grand_found_binary=$((grand_found_binary + found_binary))
+        grand_found_ginteger=$((grand_found_ginteger + found_ginteger))
+        grand_failed_binary=$((grand_failed_binary + failed_binary))
+        grand_failed_ginteger=$((grand_failed_ginteger + failed_ginteger))
     done
 done
 done
@@ -399,6 +427,11 @@ overall_rate=$(awk -v s="$grand_success" -v t="$grand_total" \
     'BEGIN {if(t>0) printf "%.1f", (s/t)*100; else print "0.0"}')
 echo "------------------------------------------------------------------------------------------------"
 printf "%-65s %7d %7d %7d %7s\n" "TOTAL" "$grand_success" "$grand_failed" "$grand_total" "$overall_rate"
+echo ""
+echo "BREAKDOWN BY INSTANCE TYPE (across all combinations)"
+echo "-----------------------------------------------------"
+echo "  Binary-only (20):      found=$grand_found_binary  failed=$grand_failed_binary"
+echo "  General integer (5):   found=$grand_found_ginteger  failed=$grand_failed_ginteger"
 echo ""
 echo "FAILURE BREAKDOWN (across all combinations)"
 echo "--------------------------------------------"
