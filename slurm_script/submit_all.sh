@@ -24,6 +24,11 @@ for PRESOLVE in "${PRESOLVES[@]}"; do
         LS="${LINESEARCHES[$i]}"
 
         for VARIANT in "${VARIANTS[@]}"; do
+            # blended (BCG) requires curvature-aware line search; skip incompatible pairs
+            if [ "$VARIANT" = "blended" ] && { [ "$LS" = "agnostic" ] || [ "$LS" = "secant" ]; }; then
+                continue
+            fi
+
             NAME="${NORM}_${VARIANT}_${LS}_presolve_${PRESOLVE}"
 
             OUT_DIR="$PROJECT_DIR/run/$NAME/output"

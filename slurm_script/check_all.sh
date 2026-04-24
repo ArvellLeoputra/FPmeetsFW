@@ -12,7 +12,7 @@ NORMS=("manhattan" "euclidean" "abssmooth" "euclidean" "euclidean" "abssmooth" "
 LINESEARCHES=("agnostic" "agnostic" "agnostic" "adaptive" "secant" "adaptive" "secant")
 VARIANTS=("vanilla" "away" "blended_pairwise" "blended")
 PRESOLVES=("false" "true")
-N_COMBINATIONS=$(( ${#NORMS[@]} * ${#VARIANTS[@]} * ${#PRESOLVES[@]} ))
+N_COMBINATIONS_TOTAL=$(( ${#NORMS[@]} * ${#VARIANTS[@]} * ${#PRESOLVES[@]} ))
 
 # Combined CSV and summary across all runs
 COMBINED_CSV="$BASE_DIR/run/comparison.csv"
@@ -39,6 +39,9 @@ grand_other=0
 for PRESOLVE in "${PRESOLVES[@]}"; do
     for i in "${!NORMS[@]}"; do
         for VARIANT in "${VARIANTS[@]}"; do
+            if [ "$VARIANT" = "blended" ] && { [ "${LINESEARCHES[$i]}" = "agnostic" ] || [ "${LINESEARCHES[$i]}" = "secant" ]; }; then
+                continue
+            fi
             rm -rf "$BASE_DIR/run/${NORMS[$i]}_${VARIANT}_${LINESEARCHES[$i]}_presolve_${PRESOLVE}/result"
         done
     done
@@ -53,6 +56,11 @@ for i in "${!NORMS[@]}"; do
     LS="${LINESEARCHES[$i]}"
 
     for VARIANT in "${VARIANTS[@]}"; do
+        # blended (BCG) requires curvature-aware line search; skip incompatible pairs
+        if [ "$VARIANT" = "blended" ] && { [ "$LS" = "agnostic" ] || [ "$LS" = "secant" ]; }; then
+            continue
+        fi
+
         NAME="${NORM}_${VARIANT}_${LS}_presolve_${PRESOLVE}"
 
         OUTPUT_DIR="$BASE_DIR/run/$NAME/output"
@@ -255,10 +263,10 @@ for i in "${!NORMS[@]}"; do
             echo "Instance: ${instance_name} (ID:${task_id})" >> "$DETAILED_FILE"
             echo "  Binary variables: ${binary_vars}" >> "$DETAILED_FILE"
             echo "  Solution found:   ${solution_found}" >> "$DETAILED_FILE"
-            echo "  Total time:       ${total_time}s" >> "$DETAILED_FILE"
+            echo "  Total time:       ${total_time}" >> "$DETAILED_FILE"
             echo "  FP iterations:    ${fp_iterations}" >> "$DETAILED_FILE"
             echo "  FW iterations:    ${fw_iterations}" >> "$DETAILED_FILE"
-            echo "  FW time:          ${fw_time}s" >> "$DETAILED_FILE"
+            echo "  FW time:          ${fw_time}" >> "$DETAILED_FILE"
             echo "  Restarts:         ${restarts}" >> "$DETAILED_FILE"
 
             if [ "$solution_found" = "true" ]; then
@@ -364,7 +372,8 @@ done
 {
 echo "FPFW Benchmark Summary"
 echo "Generated: $(date)"
-echo "Instances: $(( grand_total / N_COMBINATIONS )) per combination | Total combinations: $N_COMBINATIONS"
+N_COMBINATIONS_RAN=${#SUMMARY_NAMES[@]}
+echo "Instances: $(( grand_total / N_COMBINATIONS_RAN )) per combination | Combinations ran: $N_COMBINATIONS_RAN / $N_COMBINATIONS_TOTAL"
 echo ""
 printf "%-65s %7s %7s %7s %7s\n" "Combination (norm_variant_linesearch_presolve)" "Success" "Failed" "Total" "Rate(%)"
 echo "------------------------------------------------------------------------------------------------"
@@ -398,6 +407,6 @@ echo "------------------------------------"
 } | tee "$BENCHMARK_SUMMARY"
 
 echo ""
-echo "All $N_COMBINATIONS combinations checked."
+echo "All $N_COMBINATIONS_RAN combinations checked ($N_COMBINATIONS_TOTAL total, $(( N_COMBINATIONS_TOTAL - N_COMBINATIONS_RAN )) skipped)."
 echo "Combined CSV:       $COMBINED_CSV"
 echo "Benchmark summary:  $BENCHMARK_SUMMARY"
