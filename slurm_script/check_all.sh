@@ -47,7 +47,7 @@ for PRESOLVE in "${PRESOLVES[@]}"; do
     done
 done
 
-CSV_HEADER="ID,Instance,SolutionFound,TotalTime,FPIterations,FWIterations,Restarts,Objective,Gap,FailureReason,FailureType,ProjectionNorm,FWVariant,LineSearch,RoundingThreshold,Presolve"
+CSV_HEADER="ID,Instance,BinaryVars,IntegerVars,SolutionFound,TotalTime,FPIterations,FWIterations,Restarts,Objective,Gap,FailureReason,FailureType,ProjectionNorm,FWVariant,LineSearch,RoundingThreshold,Presolve"
 echo "$CSV_HEADER" > "$COMBINED_CSV"
 
 for PRESOLVE in "${PRESOLVES[@]}"; do
@@ -171,6 +171,7 @@ for i in "${!NORMS[@]}"; do
 
             # Extract performance metrics
             binary_vars=$(grep "Binary variables:" "$output_file" | tail -1 | awk '{print $NF}')
+            integer_vars=$(grep "General integer variables:" "$output_file" | tail -1 | awk '{print $NF}')
             INSTANCE_BINVARS["$instance_name"]="$binary_vars"
             total_time=$(grep "Total time:" "$output_file" | tail -1 | awk '{print $3}')
             fw_time=$(grep "FW time:" "$output_file" | tail -1 | awk '{print $3}')
@@ -187,7 +188,12 @@ for i in "${!NORMS[@]}"; do
             # Extract solution details if found
             if [ "$solution_found" = "true" ]; then
                 objective=$(grep "Objective:" "$output_file" | tail -1 | awk '{print $NF}')
-                gap=$(grep "Gap" "$output_file" | grep "%" | tail -1 | awk '{print $(NF-1)}' | tr -d '%')
+                gap_line=$(grep "^Gap:" "$output_file" | tail -1)
+                if echo "$gap_line" | grep -q "Infinite"; then
+                    gap="Infinite"
+                else
+                    gap=$(echo "$gap_line" | awk '{print $(NF-1)}' | tr -d '%')
+                fi
             else
                 objective="N/A"
                 gap="N/A"
@@ -254,14 +260,16 @@ for i in "${!NORMS[@]}"; do
             fi
 
             # Write to individual CSV
-            echo "${task_id},${instance_name},${solution_found},${total_time},${fp_iterations},${fw_iterations},${restarts},${objective},${gap},${failure_reason},${failure_type},${projection_norm},${fw_variant},${line_search},${rounding_threshold},${PRESOLVE}" >> "$CSV_FILE"
+            echo "${task_id},${instance_name},${binary_vars},${integer_vars},${solution_found},${total_time},${fp_iterations},${fw_iterations},${restarts},${objective},${gap},${failure_reason},${failure_type},${projection_norm},${fw_variant},${line_search},${rounding_threshold},${PRESOLVE}" >> "$CSV_FILE"
 
             # Write to combined CSV
-            echo "${task_id},${instance_name},${solution_found},${total_time},${fp_iterations},${fw_iterations},${restarts},${objective},${gap},${failure_reason},${failure_type},${projection_norm},${fw_variant},${line_search},${rounding_threshold},${PRESOLVE}" >> "$COMBINED_CSV"
+            echo "${task_id},${instance_name},${binary_vars},${integer_vars},${solution_found},${total_time},${fp_iterations},${fw_iterations},${restarts},${objective},${gap},${failure_reason},${failure_type},${projection_norm},${fw_variant},${line_search},${rounding_threshold},${PRESOLVE}" >> "$COMBINED_CSV"
 
             # Write to detailed file
             echo "Instance: ${instance_name} (ID:${task_id})" >> "$DETAILED_FILE"
-            echo "  Binary variables: ${binary_vars}" >> "$DETAILED_FILE"
+            echo "  Binary variables:  ${binary_vars}" >> "$DETAILED_FILE"
+            echo "  Integer variables: ${integer_vars}" >> "$DETAILED_FILE"
+            echo "  Integer variables: ${integer_vars}" >> "$DETAILED_FILE"
             echo "  Solution found:   ${solution_found}" >> "$DETAILED_FILE"
             echo "  Total time:       ${total_time}" >> "$DETAILED_FILE"
             echo "  FP iterations:    ${fp_iterations}" >> "$DETAILED_FILE"
@@ -271,7 +279,11 @@ for i in "${!NORMS[@]}"; do
 
             if [ "$solution_found" = "true" ]; then
                 echo "  Objective:        ${objective}" >> "$DETAILED_FILE"
-                echo "  Gap:              ${gap}%" >> "$DETAILED_FILE"
+                if [ "$gap" = "Infinite" ]; then
+                    echo "  Gap:              Infinite" >> "$DETAILED_FILE"
+                else
+                    echo "  Gap:              ${gap}%" >> "$DETAILED_FILE"
+                fi
             else
                 echo "  Failure reason:   ${failure_reason}" >> "$DETAILED_FILE"
                 echo "  Failure type:     ${failure_type}" >> "$DETAILED_FILE"

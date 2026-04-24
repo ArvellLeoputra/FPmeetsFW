@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Submit all FP-FW experiment combinations (7 pairs of norm and linesearch x 4 FW variants x 2 presolve settings)
+# Submit all FP-FW experiment combinations
 # Each job runs as an array over all instances in selection_benchmark
 
 PROJECT_DIR="/home/htc/aleoputra/project/FPmeetsFW"
