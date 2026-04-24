@@ -21,17 +21,18 @@ end
 
 mutable struct FPFWStats
     heur_time::Float64
+    rr_time::Float64
     fw_time::Float64
     fw_iterations::Int
     fp_iterations::Int
     restarts::Int
     solution_found::Bool
-    exit_reason::Symbol  # :none, :time_limit, :restart_limit, :infeasible_fw, :solution_found, :solution_rejected, :scip_time_limit, :scip_solved
+    exit_reason::Symbol  # :none, :time_limit, :restart_limit, :infeasible_fw, :solution_found, :rr_solution_found, :solution_rejected, :scip_time_limit, :scip_solved
     iter_found_solution::Union{Nothing, Int}
     lp_objective::Float64
     final_objective::Union{Nothing, Float64}
 
-    FPFWStats() = new(0.0, 0.0, 0, 0, 0, false, :none, nothing, 0.0, nothing)
+    FPFWStats() = new(0.0, 0.0, 0.0, 0, 0, 0, false, :none, nothing, 0.0, nothing)
 end
 
 # Default tolerance for feasibility/integrality checks and FW convergence
@@ -56,6 +57,9 @@ const DEF_RANDOM_SEED::Union{Nothing, Int} = 42
 
 # Rounding threshold for deciding when to round fractional solutions;
 const DEF_ROUNDING_THRESHOLD = 0.5
+
+# Randomized rounding pre-check: n_attempts = div(n_integers, DEF_RAND_ROUND_DIVISOR)
+const DEF_RAND_ROUND_DIVISOR = 2
 
 # Frank-Wolfe variant: :vanilla, :away, :blended_pairwise, :blended
 const DEF_FW_VARIANT = :vanilla

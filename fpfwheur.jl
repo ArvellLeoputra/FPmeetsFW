@@ -206,169 +206,29 @@ function SCIP.find_primal_solution(
         return true
     end
 
-    iter = 0
-    while true
-        iter += 1
-        if DEBUG_VERBOSE
-            println("\n--- FPFW Iteration $iter ---")
+    attempts = max(1, div(length(all_integers), DEF_RAND_ROUND_DIVISOR))
+    x_temp = copy(x)
+    rr_start = time()
+
+    for attempt in 1:attempts
+        for i in all_integers
+            frac = x[i] - floor(x[i])
+            x_temp[i] = rand() < frac ? ceil(x[i]) : floor(x[i])
         end
 
-        # Check time limit
-        if time() - heur.global_start_time > DEF_GLOBAL_TIME_LIMIT
-            stats.exit_reason = :time_limit
-            break
-        end
-
-        stats.fp_iterations = iter
-
-        # Step 1: Rounding LP feasible solution with custom threshold
-        round_solution!(x_round, x, all_integers, heur.rounding_threshold)
-
-        if DEBUG_VERBOSE
-            println("Rounding(threshold=$(heur.rounding_threshold)):")
-            for i in all_integers
-                @printf("  x[%d]: %.3f -> %.1f\n", i, x[i], x_round[i])
-            end
-            println("------------------------\n")
-        end
-
-        # Cycle detection: check if we've visited this rounded solution before
-        h = hash_rounded(x_round, all_integers)
-        if h in rounded_cache
-            stats.restarts += 1
-
-            if stats.restarts >= DEF_MAX_RESTARTS
-                stats.exit_reason = :restart_limit
-                break
-            end
-
-            if DEBUG_VERBOSE
-                println("Cycle detected at iteration $iter (restart #$(stats.restarts))")
-                println("Perturbing:")
-            end
-
-            for i in binary
-                if rand() < DEF_PERTURB_FRACTION
-                    x_round[i] = 1.0 - x_round[i]
-                end
-            end
-
-            for i in integer
-                if rand() < DEF_PERTURB_FRACTION
-                    var = SCIP.SCIPcolGetVar(lp_cols[i])
-                    lb = SCIP.SCIPvarGetLbLocal(var)
-                    ub = SCIP.SCIPvarGetUbLocal(var)
-                    r = rand()
-
-                    newval = if (ub - lb) < DEF_BIGBIGM
-                        floor(lb + (1 + ub - lb) * r)
-                    elseif (x_round[i] - lb) < DEF_BIGM
-                        lb + (2 * DEF_BIGM - 1) * r
-                    elseif (ub - x_round[i]) < DEF_BIGM
-                        ub - (2 * DEF_BIGM - 1) * r  
-                    else 
-                        x[i] + (2 * DEF_BIGM - 1) * r - DEF_BIGM
-                    end
-
-                    x_round[i] = clamp(floor(newval), lb, ub)  # safeguard against numerical issues
-                end
-            end
-
-            if DEBUG_VERBOSE
-                for i in binary
-                    @printf("  bin x[%d]: %.1f\n", i, x_round[i])
-                end
-                
-                for i in integer
-                    @printf("  int x[%d]: %.1f\n", i, x_round[i])
-                end
-                println()
-            end
-
-            prev_x .= x  # sync prev_x for distance calculation
-
-            # Recompute hash after perturbation so we cache the new rounding
-            h = hash_rounded(x_round, all_integers)
-        end
-
-        push!(rounded_cache, h)
-
-        empty!(fw_traj)
-        
-        # Step 2: Projection using Frank-Wolfe
-        remaining_time = DEF_GLOBAL_TIME_LIMIT - (time() - heur.global_start_time)
-        fw_start = time()
-
-        x_new, _ = call_fw_variant(
-            heur.fw_variant,
-            x -> f_proj(x, x_round),
-            (storage, x) -> g_proj(storage, x, x_round),
-            heur.lmo,
-            x,
-            max_iteration = DEF_FW_MAX_ITER,
-            verbose = false,
-            line_search = ls,
-            epsilon = DEF_FW_TOLERANCE,
-            callback = fw_callback,
-            timeout = remaining_time
-        )
-
-        stats.fw_time += time() - fw_start
-        fw_iters = length(fw_traj)
-        stats.fw_iterations += fw_iters
-
-        # Check time limit after FW returns (may have timed out mid-run)
-        if time() - heur.global_start_time > DEF_GLOBAL_TIME_LIMIT
-            stats.exit_reason = :time_limit
-            break
-        end
-
-        if DEBUG_VERBOSE
-            for (t, xk, fk) in fw_traj
-                println("--- FW Step $t ---")
-                println("Solution:")
-                for i in all_integers
-                    @printf("  x[%d]: %.3f\n", i, xk[i])
-                end
-                @printf("Objective = %.3f\n\n", fk)
-            end
-        end
-
-        # Step 3: Check feasibility, integrality, distance moved, and objective value
-        is_integral = check_integrality(x_new, all_integers)
-        is_feasible = check_feasibility(scip, x_new, col_to_idx)
-        obj_val = sum(x_new[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lp_cols[j])) for j in 1:nvars)
-
-        if DEBUG_VERBOSE
-            nfrac_binary = count(i -> abs(x_new[i] - round(x_new[i])) > DEF_TOLERANCE, binary)
-            nfrac_integer = count(i -> abs(x_new[i] - round(x_new[i])) > DEF_TOLERANCE, integer)
-            dist_moved = f_proj(x_new, prev_x)
-            int_gap = f_proj(x_new, x_round)
-
-            @printf("[Iter %d] obj=%.3f | distance_moved=%.3f | integrality_gap=%.3f | frac_bin=%d/%d | frac_int=%d/%d | fw_iters=%d | integral=%s | feasible=%s\n",
-                iter, obj_val, dist_moved, int_gap, nfrac_binary, length(binary), nfrac_integer, length(integer), fw_iters, is_integral, is_feasible)
-        end
-
-        # Safety check: FW must always return a feasible point (LP polytope is preserved)
-        if !is_feasible
-            stats.exit_reason = :infeasible_fw
-            break
-        end
-
-        if is_integral
-            # Submit solution to SCIP
-            if submit_solution_to_scip(scip, heur_ptr, lp_cols, x_new, nvars)
+        if check_feasibility(scip, x_temp, col_to_idx)
+            if submit_solution_to_scip(scip, heur_ptr, lp_cols, x_temp, nvars)
                 stats.solution_found = true
-                stats.exit_reason = :solution_found
-                stats.iter_found_solution = iter
-                stats.final_objective = obj_val
+                stats.exit_reason = :rr_solution_found
+                stats.iter_found_solution = 0
+                stats.final_objective = sum(x_temp[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lp_cols[j])) for j in 1:nvars)
                 result = SCIP.SCIP_FOUNDSOL
 
                 if DEBUG_VERBOSE
                     println()
                     println("End solution:")
                     for j in 1:nvars
-                        @printf("  x[%d] = %.3f\n", j, x_new[j])
+                        @printf("  x[%d] = %.3f\n", j, x_temp[j])
                     end
                 end
                 break
@@ -376,10 +236,187 @@ function SCIP.find_primal_solution(
                 stats.exit_reason = :solution_rejected
                 break
             end
-        else
-            # Continue with the projected solution for next FW iteration
-            prev_x .= x
-            x .= x_new
+        end
+    end
+
+    stats.rr_time = time() - rr_start
+
+    if !stats.solution_found
+        iter = 0
+        while true
+            iter += 1
+            if DEBUG_VERBOSE
+                println("\n--- FPFW Iteration $iter ---")
+            end
+
+            # Check time limit
+            if time() - heur.global_start_time > DEF_GLOBAL_TIME_LIMIT
+                stats.exit_reason = :time_limit
+                break
+            end
+
+            stats.fp_iterations = iter
+
+            # Step 1: Rounding LP feasible solution with custom threshold
+            round_solution!(x_round, x, all_integers, heur.rounding_threshold)
+
+            if DEBUG_VERBOSE
+                println("Rounding(threshold=$(heur.rounding_threshold)):")
+                for i in all_integers
+                    @printf("  x[%d]: %.3f -> %.1f\n", i, x[i], x_round[i])
+                end
+                println("------------------------\n")
+            end
+
+            # Cycle detection: check if we've visited this rounded solution before
+            h = hash_rounded(x_round, all_integers)
+            if h in rounded_cache
+                stats.restarts += 1
+
+                if stats.restarts >= DEF_MAX_RESTARTS
+                    stats.exit_reason = :restart_limit
+                    break
+                end
+
+                if DEBUG_VERBOSE
+                    println("Cycle detected at iteration $iter (restart #$(stats.restarts))")
+                    println("Perturbing:")
+                end
+
+                for i in binary
+                    if rand() < DEF_PERTURB_FRACTION
+                        x_round[i] = 1.0 - x_round[i]
+                    end
+                end
+
+                for i in integer
+                    if rand() < DEF_PERTURB_FRACTION
+                        var = SCIP.SCIPcolGetVar(lp_cols[i])
+                        lb = SCIP.SCIPvarGetLbLocal(var)
+                        ub = SCIP.SCIPvarGetUbLocal(var)
+                        r = rand()
+
+                        newval = if (ub - lb) < DEF_BIGBIGM
+                            floor(lb + (1 + ub - lb) * r)
+                        elseif (x_round[i] - lb) < DEF_BIGM
+                            lb + (2 * DEF_BIGM - 1) * r
+                        elseif (ub - x_round[i]) < DEF_BIGM
+                            ub - (2 * DEF_BIGM - 1) * r
+                        else
+                            x[i] + (2 * DEF_BIGM - 1) * r - DEF_BIGM
+                        end
+
+                        x_round[i] = clamp(floor(newval), lb, ub)
+                    end
+                end
+
+                if DEBUG_VERBOSE
+                    for i in binary
+                        @printf("  bin x[%d]: %.1f\n", i, x_round[i])
+                    end
+
+                    for i in integer
+                        @printf("  int x[%d]: %.1f\n", i, x_round[i])
+                    end
+                    println()
+                end
+
+                prev_x .= x  # sync prev_x for distance calculation
+
+                # Recompute hash after perturbation so we cache the new rounding
+                h = hash_rounded(x_round, all_integers)
+            end
+
+            push!(rounded_cache, h)
+
+            empty!(fw_traj)
+
+            # Step 2: Projection using Frank-Wolfe
+            remaining_time = DEF_GLOBAL_TIME_LIMIT - (time() - heur.global_start_time)
+            fw_start = time()
+
+            x_new, _ = call_fw_variant(
+                heur.fw_variant,
+                x -> f_proj(x, x_round),
+                (storage, x) -> g_proj(storage, x, x_round),
+                heur.lmo,
+                x,
+                max_iteration = DEF_FW_MAX_ITER,
+                verbose = false,
+                line_search = ls,
+                epsilon = DEF_FW_TOLERANCE,
+                callback = fw_callback,
+                timeout = remaining_time
+            )
+
+            stats.fw_time += time() - fw_start
+            fw_iters = length(fw_traj)
+            stats.fw_iterations += fw_iters
+
+            # Check time limit after FW returns (may have timed out mid-run)
+            if time() - heur.global_start_time > DEF_GLOBAL_TIME_LIMIT
+                stats.exit_reason = :time_limit
+                break
+            end
+
+            if DEBUG_VERBOSE
+                for (t, xk, fk) in fw_traj
+                    println("--- FW Step $t ---")
+                    println("Solution:")
+                    for i in all_integers
+                        @printf("  x[%d]: %.3f\n", i, xk[i])
+                    end
+                    @printf("Objective = %.3f\n\n", fk)
+                end
+            end
+
+            # Step 3: Check feasibility, integrality, distance moved, and objective value
+            is_integral = check_integrality(x_new, all_integers)
+            is_feasible = check_feasibility(scip, x_new, col_to_idx)
+            obj_val = sum(x_new[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lp_cols[j])) for j in 1:nvars)
+
+            if DEBUG_VERBOSE
+                nfrac_binary = count(i -> abs(x_new[i] - round(x_new[i])) > DEF_TOLERANCE, binary)
+                nfrac_integer = count(i -> abs(x_new[i] - round(x_new[i])) > DEF_TOLERANCE, integer)
+                dist_moved = f_proj(x_new, prev_x)
+                int_gap = f_proj(x_new, x_round)
+
+                @printf("[Iter %d] obj=%.3f | distance_moved=%.3f | integrality_gap=%.3f | frac_bin=%d/%d | frac_int=%d/%d | fw_iters=%d | integral=%s | feasible=%s\n",
+                    iter, obj_val, dist_moved, int_gap, nfrac_binary, length(binary), nfrac_integer, length(integer), fw_iters, is_integral, is_feasible)
+            end
+
+            # Safety check: FW must always return a feasible point (LP polytope is preserved)
+            if !is_feasible
+                stats.exit_reason = :infeasible_fw
+                break
+            end
+
+            if is_integral
+                # Submit solution to SCIP
+                if submit_solution_to_scip(scip, heur_ptr, lp_cols, x_new, nvars)
+                    stats.solution_found = true
+                    stats.exit_reason = :solution_found
+                    stats.iter_found_solution = iter
+                    stats.final_objective = obj_val
+                    result = SCIP.SCIP_FOUNDSOL
+
+                    if DEBUG_VERBOSE
+                        println()
+                        println("End solution:")
+                        for j in 1:nvars
+                            @printf("  x[%d] = %.3f\n", j, x_new[j])
+                        end
+                    end
+                    break
+                else
+                    stats.exit_reason = :solution_rejected
+                    break
+                end
+            else
+                # Continue with the projected solution for next FW iteration
+                prev_x .= x
+                x .= x_new
+            end
         end
     end
 

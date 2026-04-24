@@ -39,6 +39,7 @@ grand_found_binary=0
 grand_found_ginteger=0
 grand_failed_binary=0
 grand_failed_ginteger=0
+grand_rr_found=0
 
 # Clean up previous check_all.sh outputs before re-running
 for PRESOLVE in "${PRESOLVES[@]}"; do
@@ -118,6 +119,7 @@ for i in "${!NORMS[@]}"; do
         restart_limit_count=0
         fw_infeasible_count=0
         other_failure_count=0
+        rr_found_count=0
         found_binary=0
         found_ginteger=0
         failed_binary=0
@@ -169,6 +171,7 @@ for i in "${!NORMS[@]}"; do
             restart_limit=""
             fw_infeasible=""
             scip_solved=""
+            rr_found=""
 
             case "$exit_reason_str" in
                 *"SCIP time limit"*)               scip_timelimit="yes" ;;
@@ -176,6 +179,7 @@ for i in "${!NORMS[@]}"; do
                 *"cycled"*)                        restart_limit="yes" ;;
                 *"outside the feasible polytope"*) fw_infeasible="yes" ;;
                 *"solved by SCIP"*)                scip_solved="yes" ;;
+                *"randomized rounding"*)           rr_found="yes" ;;
             esac
 
             # Extract performance metrics
@@ -235,6 +239,7 @@ for i in "${!NORMS[@]}"; do
             elif [ "$solution_found" = "true" ]; then
                 found_count=$((found_count + 1))
                 this_was_found=1
+                [ -n "$rr_found" ] && rr_found_count=$((rr_found_count + 1))
                 found_times+=("$total_time")
                 found_fw_iters+=("$fw_iterations")
                 found_fp_iters+=("$fp_iterations")
@@ -342,6 +347,8 @@ for i in "${!NORMS[@]}"; do
         echo "Total test cases processed: $total_count" >> "$SUMMARY_FILE"
         echo "" >> "$SUMMARY_FILE"
         echo "Solutions found: $found_count ($(awk -v f="$found_count" -v t="$total_count" 'BEGIN {if(t>0) printf "%.2f", (f/t)*100; else print "0.00"}')%)" >> "$SUMMARY_FILE"
+        echo "  - Via randomized rounding: $rr_found_count" >> "$SUMMARY_FILE"
+        echo "  - Via FPFW main loop:      $((found_count - rr_found_count))" >> "$SUMMARY_FILE"
         echo "Failed/Interrupted: $failed_count ($(awk -v f="$failed_count" -v t="$total_count" 'BEGIN {if(t>0) printf "%.2f", (f/t)*100; else print "0.00"}')%)" >> "$SUMMARY_FILE"
         echo "" >> "$SUMMARY_FILE"
 
@@ -404,6 +411,7 @@ for i in "${!NORMS[@]}"; do
         grand_found_ginteger=$((grand_found_ginteger + found_ginteger))
         grand_failed_binary=$((grand_failed_binary + failed_binary))
         grand_failed_ginteger=$((grand_failed_ginteger + failed_ginteger))
+        grand_rr_found=$((grand_rr_found + rr_found_count))
     done
 done
 done
@@ -427,6 +435,11 @@ overall_rate=$(awk -v s="$grand_success" -v t="$grand_total" \
     'BEGIN {if(t>0) printf "%.1f", (s/t)*100; else print "0.0"}')
 echo "------------------------------------------------------------------------------------------------"
 printf "%-65s %7d %7d %7d %7s\n" "TOTAL" "$grand_success" "$grand_failed" "$grand_total" "$overall_rate"
+echo ""
+echo "SOLUTION METHOD BREAKDOWN (across all combinations)"
+echo "-----------------------------------------------------"
+echo "  Via randomized rounding: $grand_rr_found"
+echo "  Via FPFW main loop:      $((grand_success - grand_rr_found))"
 echo ""
 echo "BREAKDOWN BY INSTANCE TYPE (across all combinations)"
 echo "-----------------------------------------------------"
