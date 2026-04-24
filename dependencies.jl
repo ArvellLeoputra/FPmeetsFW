@@ -9,6 +9,7 @@ const MOI = MathOptInterface
 
 mutable struct FPFWHeuristic <: SCIP.Heuristic
     binary_vars::Int
+    general_integer_vars::Int
     called::Int64
     lmo::Union{Nothing, FrankWolfe.MathOptLMO}
     projection_norm::Symbol
@@ -46,7 +47,9 @@ const DEF_SCIP_TIME_LIMIT = 300.0
 
 # Perturbation parameters
 const DEF_PERTURB_FRACTION = 0.2   # Fraction of binary vars to flip when cycle detected
-const DEF_MAX_RESTARTS = 1000 # Maximum number of restarts before giving up
+const DEF_MAX_RESTARTS = 1000  # Maximum number of restarts before giving up
+const DEF_BIGM = 1e9  # Big M constant for cycle-breaking perturbations
+const DEF_BIGBIGM = 1e15  # Bigbig M constant for perturbations
 
 # Random seed for reproducibility; set to nothing to disable
 const DEF_RANDOM_SEED::Union{Nothing, Int} = 42

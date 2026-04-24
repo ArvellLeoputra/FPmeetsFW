@@ -105,11 +105,11 @@ end
 # Helper function to check integrality
 function check_integrality(
     solution::Vector{Float64}, 
-    binary_indices::Vector{Int}, 
+    integer_indices::Vector{Int}, 
     tolerance::Float64=DEF_TOLERANCE
 )::Bool
 
-    for i in binary_indices
+    for i in integer_indices
         if abs(solution[i] - round(solution[i])) > tolerance
             return false
         end

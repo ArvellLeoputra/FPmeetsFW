@@ -53,14 +53,21 @@ function SCIP.find_primal_solution(
     col_to_idx = Dict(lp_cols[k] => k for k in 1:nvars)
 
     binary = Int[]
+    integer = Int[]
+
     current_solution = zeros(SCIP.SCIP_Real, nvars)
 
-    # Identify binary variables
+    # Identify binary and integer variables
     for j in 1:nvars
-        if SCIP.SCIPvarIsBinary(SCIP.SCIPcolGetVar(lp_cols[j])) == SCIP.TRUE
+        var = SCIP.SCIPcolGetVar(lp_cols[j])
+        if SCIP.SCIPvarIsBinary(var) == SCIP.TRUE
             push!(binary, j)
+        elseif SCIP.SCIPvarIsIntegral(var) == SCIP.TRUE
+            push!(integer, j)
         end
     end
+
+    all_integers = [binary; integer]
 
     # Get current LP solution
     for j in 1:nvars
@@ -79,14 +86,19 @@ function SCIP.find_primal_solution(
 
     if DEBUG_VERBOSE
         println("Initial LP objective: $(round(stats.lp_objective, digits=4))")
-        nfrac = count(i -> abs(current_solution[i] - round(current_solution[i])) > DEF_TOLERANCE, binary)
-        println("Non-integral binary vars: $nfrac/$(length(binary))")
+
+        nfrac_binary = count(i -> abs(current_solution[i] - round(current_solution[i])) > DEF_TOLERANCE, binary)
+        println("Non-integral binary vars: $nfrac_binary/$(length(binary))")
+
+        nfrac_integer = count(i -> abs(current_solution[i] - round(current_solution[i])) > DEF_TOLERANCE, integer)
+        println("Non-integral integer vars: $nfrac_integer/$(length(integer))")
+
     end
 
     if heur.projection_norm == :manhattan
         f_proj = (x, x_round) -> begin
             s = 0.0
-            for i in binary
+            for i in all_integers
                 s += abs(x[i] - x_round[i])
             end
             return s
@@ -94,7 +106,7 @@ function SCIP.find_primal_solution(
 
         g_proj = (storage, x, x_round) -> begin
             storage .= 0.0
-            for i in binary
+            for i in all_integers
                 d = x[i] - x_round[i]
                 if d > 0
                     storage[i] = 1.0
@@ -108,7 +120,7 @@ function SCIP.find_primal_solution(
     elseif heur.projection_norm == :euclidean
         f_proj = (x, x_round) -> begin
             s = 0.0
-            for i in binary
+            for i in all_integers
                 d = x[i] - x_round[i]
                 s += d * d
             end
@@ -117,7 +129,7 @@ function SCIP.find_primal_solution(
 
         g_proj = (storage, x, x_round) -> begin
             storage .= 0.0
-            for i in binary
+            for i in all_integers
                 storage[i] = x[i] - x_round[i]
             end
             return storage
@@ -126,7 +138,7 @@ function SCIP.find_primal_solution(
     elseif heur.projection_norm == :abssmooth
         f_proj = (x, x_round) -> begin
             s = 0.0
-            for i in binary
+            for i in all_integers
                 d = x[i] - x_round[i]
                 s += sqrt(d * d + DEF_TOLERANCE)  # Smooth approximation of abs
             end
@@ -135,7 +147,7 @@ function SCIP.find_primal_solution(
 
         g_proj = (storage, x, x_round) -> begin
             storage .= 0.0
-            for i in binary
+            for i in all_integers
                 d = x[i] - x_round[i]
                 storage[i] = d / sqrt(d * d + DEF_TOLERANCE)  # Gradient of smooth abs
             end
@@ -146,15 +158,15 @@ function SCIP.find_primal_solution(
         error("Unknown projection norm: $(heur.projection_norm)")
     end
 
-    # Hash function for cycle detection (only hashes binary variable values)
-    function hash_rounded(x_round, binary_indices)
-        hash(tuple((x_round[i] for i in binary_indices)...))
+    # Hash function for cycle detection (only hashes integer variable values)
+    function hash_rounded(x_round, integer_indices)
+        hash(tuple((x_round[i] for i in integer_indices)...))
     end
     
     # Rounding function using custom threshold
-    function round_with_threshold!(x_round, x, binary_indices, threshold)
-        for i in binary_indices
-            x_round[i] = x[i] >= threshold ? 1.0 : 0.0
+    function round_solution!(x_round, x, integer_indices, threshold)
+        for i in integer_indices
+            x_round[i] = x[i] - floor(x[i]) >= threshold ? ceil(x[i]) : floor(x[i])
         end
     end
 
@@ -208,18 +220,18 @@ function SCIP.find_primal_solution(
         stats.fp_iterations = iter
 
         # Step 1: Rounding LP feasible solution with custom threshold
-        round_with_threshold!(x_round, x, binary, heur.rounding_threshold)
+        round_solution!(x_round, x, all_integers, heur.rounding_threshold)
 
         if DEBUG_VERBOSE
             println("Rounding(threshold=$(heur.rounding_threshold)):")
-            for i in binary
+            for i in all_integers
                 @printf("  x[%d]: %.3f -> %.1f\n", i, x[i], x_round[i])
             end
             println("------------------------\n")
         end
 
         # Cycle detection: check if we've visited this rounded solution before
-        h = hash_rounded(x_round, binary)
+        h = hash_rounded(x_round, all_integers)
         if h in rounded_cache
             stats.restarts += 1
 
@@ -239,9 +251,34 @@ function SCIP.find_primal_solution(
                 end
             end
 
+            for i in integer
+                if rand() < DEF_PERTURB_FRACTION
+                    var = SCIP.SCIPcolGetVar(lp_cols[i])
+                    lb = SCIP.SCIPvarGetLbLocal(var)
+                    ub = SCIP.SCIPvarGetUbLocal(var)
+                    r = rand()
+
+                    newval = if (ub - lb) < DEF_BIGBIGM
+                        floor(lb + (1 + ub - lb) * r)
+                    elseif (x_round[i] - lb) < DEF_BIGM
+                        lb + (2 * DEF_BIGM - 1) * r
+                    elseif (ub - x_round[i]) < DEF_BIGM
+                        ub - (2 * DEF_BIGM - 1) * r  
+                    else 
+                        x[i] + (2 * DEF_BIGM - 1) * r - DEF_BIGM
+                    end
+
+                    x_round[i] = clamp(floor(newval), lb, ub)  # safeguard against numerical issues
+                end
+            end
+
             if DEBUG_VERBOSE
                 for i in binary
-                    @printf("  x[%d]: %.1f\n", i, x_round[i])
+                    @printf("  bin x[%d]: %.1f\n", i, x_round[i])
+                end
+                
+                for i in integer
+                    @printf("  int x[%d]: %.1f\n", i, x_round[i])
                 end
                 println()
             end
@@ -249,7 +286,7 @@ function SCIP.find_primal_solution(
             prev_x .= x  # sync prev_x for distance calculation
 
             # Recompute hash after perturbation so we cache the new rounding
-            h = hash_rounded(x_round, binary)
+            h = hash_rounded(x_round, all_integers)
         end
 
         push!(rounded_cache, h)
@@ -288,7 +325,7 @@ function SCIP.find_primal_solution(
             for (t, xk, fk) in fw_traj
                 println("--- FW Step $t ---")
                 println("Solution:")
-                for i in binary
+                for i in all_integers
                     @printf("  x[%d]: %.3f\n", i, xk[i])
                 end
                 @printf("Objective = %.3f\n\n", fk)
@@ -296,17 +333,18 @@ function SCIP.find_primal_solution(
         end
 
         # Step 3: Check feasibility, integrality, distance moved, and objective value
-        is_integral = check_integrality(x_new, binary)
+        is_integral = check_integrality(x_new, all_integers)
         is_feasible = check_feasibility(scip, x_new, col_to_idx)
         obj_val = sum(x_new[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lp_cols[j])) for j in 1:nvars)
 
         if DEBUG_VERBOSE
-            nfrac = count(i -> abs(x_new[i] - round(x_new[i])) > DEF_TOLERANCE, binary)
+            nfrac_binary = count(i -> abs(x_new[i] - round(x_new[i])) > DEF_TOLERANCE, binary)
+            nfrac_integer = count(i -> abs(x_new[i] - round(x_new[i])) > DEF_TOLERANCE, integer)
             dist_moved = f_proj(x_new, prev_x)
             int_gap = f_proj(x_new, x_round)
 
-            @printf("[Iter %d] obj=%.3f | distance_moved=%.3f | integrality_gap=%.3f | frac=%d/%d | fw_iters=%d | integral=%s | feasible=%s\n",
-                iter, obj_val, dist_moved, int_gap, nfrac, length(binary), fw_iters, is_integral, is_feasible)
+            @printf("[Iter %d] obj=%.3f | distance_moved=%.3f | integrality_gap=%.3f | frac_bin=%d/%d | frac_int=%d/%d | fw_iters=%d | integral=%s | feasible=%s\n",
+                iter, obj_val, dist_moved, int_gap, nfrac_binary, length(binary), nfrac_integer, length(integer), fw_iters, is_integral, is_feasible)
         end
 
         # Safety check: FW must always return a feasible point (LP polytope is preserved)

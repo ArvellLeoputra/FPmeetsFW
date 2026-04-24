@@ -15,21 +15,23 @@ function mps_test_model(filename::String, projection_norm::Symbol, rounding_thre
     nvars_orig = SCIP.SCIPgetNOrigVars(scip)
     orig_vars = unsafe_wrap(Vector{Ptr{SCIP.SCIP_VAR}}, SCIP.SCIPgetOrigVars(scip), nvars_orig)
     n_orig_binary = sum(SCIP.SCIPvarGetType(orig_vars[j]) == SCIP.SCIP_VARTYPE_BINARY for j in 1:nvars_orig)
+    n_orig_integer = sum(SCIP.SCIPvarGetType(orig_vars[j]) == SCIP.SCIP_VARTYPE_INTEGER for j in 1:nvars_orig)
 
     println("="^80)
     println("RUN INFO")
     println("="^80)
-    println("Instance:          $(basename(filename))")
-    println("Total variables:   $nvars_orig")
-    println("Binary variables:  $n_orig_binary")
-    println("Projection norm:   $projection_norm")
-    println("Rounding thresh:   $rounding_threshold")
-    println("FW variant:        $fw_variant")
-    println("Line search:       $line_search")
-    println("Presolve:          $presolve")
+    println("Instance:                  $(basename(filename))")
+    println("Total variables:           $nvars_orig")
+    println("Binary variables:          $n_orig_binary")
+    println("General integer variables: $n_orig_integer")
+    println("Projection norm:           $projection_norm")
+    println("Rounding thresh:           $rounding_threshold")
+    println("FW variant:                $fw_variant")
+    println("Line search:               $line_search")
+    println("Presolve:                  $presolve")
     println("="^80)
 
-    heur = FPFWHeuristic(n_orig_binary, 0, nothing, projection_norm, rounding_threshold, fw_variant, line_search, global_start_time)
+    heur = FPFWHeuristic(n_orig_binary, n_orig_integer, 0, nothing, projection_norm, rounding_threshold, fw_variant, line_search, global_start_time)
     SCIP.include_heuristic(
         backend,
         heur,

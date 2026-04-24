@@ -34,7 +34,7 @@ for PRESOLVE in "${PRESOLVES[@]}"; do
             sbatch <<EOF || { echo "ERROR: sbatch failed for $NAME"; continue; }
 #!/bin/bash
 #SBATCH --job-name=fpfw_${NORM}_${VARIANT}_${LS}_${PRESOLVE}
-#SBATCH --time=10:00
+#SBATCH --time=20:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
