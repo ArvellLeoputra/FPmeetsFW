@@ -27,6 +27,7 @@ declare -a SUMMARY_SUCCESS=()
 declare -a SUMMARY_FAILED=()
 declare -a SUMMARY_TOTAL=()
 declare -A INSTANCE_BINVARS=()
+declare -A INSTANCE_INTVARS=()
 
 grand_success=0
 grand_failed=0
@@ -86,14 +87,14 @@ for i in "${!NORMS[@]}"; do
     echo "" >> "$DETAILED_FILE"
 
     echo "Test cases with solutions found:" > "$FOUND_FILE"
-    echo "====================================================================================================================" >> "$FOUND_FILE"
-    printf "%-3s %-25s %-8s %-12s %-10s %-10s %-10s %-12s %-8s\n" "ID" "Instance" "Bin Vars" "Time (s)" "FP Iters" "FW Iters" "Restarts" "Objective" "Gap (%)" >> "$FOUND_FILE"
-    echo "====================================================================================================================" >> "$FOUND_FILE"
+    echo "=============================================================================================================================" >> "$FOUND_FILE"
+    printf "%-3s %-25s %-6s %-6s %-12s %-10s %-10s %-10s %-12s %-8s\n" "ID" "Instance" "Bin" "Int" "Time (s)" "FP Iters" "FW Iters" "Restarts" "Objective" "Gap (%)" >> "$FOUND_FILE"
+    echo "=============================================================================================================================" >> "$FOUND_FILE"
 
     echo "Failed/Interrupted runs:" > "$FAILED_FILE"
-    echo "==========================================================================================================" >> "$FAILED_FILE"
-    printf "%-3s %-25s %-8s %-15s %-50s\n" "ID" "Instance" "Bin Vars" "Runtime (s)" "Failure Reason" >> "$FAILED_FILE"
-    echo "==========================================================================================================" >> "$FAILED_FILE"
+    echo "===============================================================================================================================" >> "$FAILED_FILE"
+    printf "%-3s %-25s %-6s %-6s %-15s %-50s\n" "ID" "Instance" "Bin" "Int" "Runtime (s)" "Failure Reason" >> "$FAILED_FILE"
+    echo "===============================================================================================================================" >> "$FAILED_FILE"
 
     # CSV header
     echo "$CSV_HEADER" > "$CSV_FILE"
@@ -169,6 +170,7 @@ for i in "${!NORMS[@]}"; do
         binary_vars=$(grep "Binary variables:" "$output_file" | tail -1 | awk '{print $NF}')
         integer_vars=$(grep "General integer variables:" "$output_file" | tail -1 | awk '{print $NF}')
         INSTANCE_BINVARS["$instance_name"]="$binary_vars"
+        INSTANCE_INTVARS["$instance_name"]="${integer_vars:-0}"
         total_time=$(grep "Total time:" "$output_file" | tail -1 | awk '{print $3}')
         fw_time=$(grep "FW time:" "$output_file" | tail -1 | awk '{print $3}')
         fp_iterations=$(grep "FP iterations:" "$output_file" | tail -1 | awk '{print $NF}')
@@ -201,14 +203,14 @@ for i in "${!NORMS[@]}"; do
             failure_type="SCIP_TIMELIMIT"
             failed_count=$((failed_count + 1))
             scip_timelimit_count=$((scip_timelimit_count + 1))
-            printf "%-3s %-25s %-8s %-15s %-50s\n" "$task_id" "$instance_name" "$binary_vars" "${total_time:-N/A}" "SCIP time limit (${DEF_SCIP_TIME_LIMIT}s)" >> "$FAILED_FILE"
+            printf "%-3s %-25s %-6s %-6s %-15s %-50s\n" "$task_id" "$instance_name" "$binary_vars" "${integer_vars:-0}" "${total_time:-N/A}" "SCIP time limit (${DEF_SCIP_TIME_LIMIT}s)" >> "$FAILED_FILE"
 
         elif [ -n "$global_timelimit" ]; then
             failure_reason="GLOBAL_TIME_LIMIT (${DEF_GLOBAL_TIME_LIMIT}s per iteration)"
             failure_type="GLOBAL_TIMELIMIT"
             failed_count=$((failed_count + 1))
             global_timelimit_count=$((global_timelimit_count + 1))
-            printf "%-3s %-25s %-8s %-15s %-50s\n" "$task_id" "$instance_name" "$binary_vars" "${total_time:-N/A}" "Global time limit (${DEF_GLOBAL_TIME_LIMIT}s)" >> "$FAILED_FILE"
+            printf "%-3s %-25s %-6s %-6s %-15s %-50s\n" "$task_id" "$instance_name" "$binary_vars" "${integer_vars:-0}" "${total_time:-N/A}" "Global time limit (${DEF_GLOBAL_TIME_LIMIT}s)" >> "$FAILED_FILE"
 
         elif [ "$solution_found" = "true" ]; then
             found_count=$((found_count + 1))
@@ -218,29 +220,29 @@ for i in "${!NORMS[@]}"; do
             found_fw_iters+=("$fw_iterations")
             found_fp_iters+=("$fp_iterations")
             found_restarts+=("$restarts")
-            printf "%-3s %-25s %-8s %-12s %-10s %-10s %-10s %-12s %-8s\n" \
-                "$task_id" "$instance_name" "$binary_vars" "$total_time" "$fp_iterations" "$fw_iterations" "$restarts" "$objective" "$gap" >> "$FOUND_FILE"
+            printf "%-3s %-25s %-6s %-6s %-12s %-10s %-10s %-10s %-12s %-8s\n" \
+                "$task_id" "$instance_name" "$binary_vars" "${integer_vars:-0}" "$total_time" "$fp_iterations" "$fw_iterations" "$restarts" "$objective" "$gap" >> "$FOUND_FILE"
 
         elif [ -n "$fw_infeasible" ]; then
             failure_reason="FW_INFEASIBLE (FW returned infeasible solution)"
             failure_type="FW_INFEASIBLE"
             failed_count=$((failed_count + 1))
             fw_infeasible_count=$((fw_infeasible_count + 1))
-            printf "%-3s %-25s %-8s %-15s %-50s\n" "$task_id" "$instance_name" "$binary_vars" "${total_time:-N/A}" "FW returns infeasible solution" >> "$FAILED_FILE"
+            printf "%-3s %-25s %-6s %-6s %-15s %-50s\n" "$task_id" "$instance_name" "$binary_vars" "${integer_vars:-0}" "${total_time:-N/A}" "FW returns infeasible solution" >> "$FAILED_FILE"
 
         elif [ -n "$restart_limit" ]; then
             failure_reason="RESTART_LIMIT (max restarts reached)"
             failure_type="RESTART_LIMIT"
             failed_count=$((failed_count + 1))
             restart_limit_count=$((restart_limit_count + 1))
-            printf "%-3s %-25s %-8s %-15s %-50s\n" "$task_id" "$instance_name" "$binary_vars" "${total_time:-N/A}" "Maximum restarts reached" >> "$FAILED_FILE"
+            printf "%-3s %-25s %-6s %-6s %-15s %-50s\n" "$task_id" "$instance_name" "$binary_vars" "${integer_vars:-0}" "${total_time:-N/A}" "Maximum restarts reached" >> "$FAILED_FILE"
 
         else
             failure_reason="UNKNOWN_ERROR"
             failure_type="UNKNOWN"
             failed_count=$((failed_count + 1))
             other_failure_count=$((other_failure_count + 1))
-            printf "%-3s %-25s %-8s %-15s %-50s\n" "$task_id" "$instance_name" "$binary_vars" "${total_time:-N/A}" "Unknown error" >> "$FAILED_FILE"
+            printf "%-3s %-25s %-6s %-6s %-15s %-50s\n" "$task_id" "$instance_name" "$binary_vars" "${integer_vars:-0}" "${total_time:-N/A}" "Unknown error" >> "$FAILED_FILE"
         fi
 
         # Classify by instance type (binary-only vs general integer)
@@ -409,14 +411,14 @@ echo "  Restart limit:     $grand_restart_limit"
 echo "  FW infeasible:     $grand_fw_infeasible"
 echo "  Unknown:           $grand_other"
 echo ""
-echo "INSTANCE BINARY VARIABLE COUNTS"
-echo "------------------------------------"
-printf "%-40s %s\n" "Instance" "Bin Vars"
-echo "------------------------------------"
+echo "INSTANCE VARIABLE COUNTS"
+echo "----------------------------------------------------"
+printf "%-40s %-10s %-10s\n" "Instance" "Bin Vars" "Int Vars"
+echo "----------------------------------------------------"
 for inst in $(echo "${!INSTANCE_BINVARS[@]}" | tr ' ' '\n' | sort); do
-    printf "%-40s %s\n" "$inst" "${INSTANCE_BINVARS[$inst]}"
+    printf "%-40s %-10s %-10s\n" "$inst" "${INSTANCE_BINVARS[$inst]}" "${INSTANCE_INTVARS[$inst]:-0}"
 done
-echo "------------------------------------"
+echo "----------------------------------------------------"
 } | tee "$BENCHMARK_SUMMARY"
 
 echo ""
