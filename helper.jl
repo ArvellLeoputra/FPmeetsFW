@@ -14,7 +14,7 @@ function print_heuristic_summary(
     elseif stats.exit_reason == :solution_found
         "integer feasible solution accepted by SCIP at iteration $(stats.iter_found_solution)"
     elseif stats.exit_reason == :rr_solution_found
-        "integer feasible solution found by randomized rounding pre-check"
+        "integer feasible solution found by randomized rounding at iteration $(stats.iter_found_solution)"
     elseif stats.exit_reason == :solution_rejected
         "integer feasible solution found but rejected by SCIP"
     elseif stats.exit_reason == :scip_time_limit

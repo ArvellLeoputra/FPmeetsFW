@@ -60,6 +60,7 @@ const DEF_ROUNDING_THRESHOLD = 0.5
 
 # Randomized rounding pre-check: n_attempts = div(n_integers, DEF_RAND_ROUND_DIVISOR)
 const DEF_RAND_ROUND_DIVISOR = 2
+const DEF_RR_TIME_LIMIT = 5.0
 
 # Frank-Wolfe variant: :vanilla, :away, :blended_pairwise, :blended
 const DEF_FW_VARIANT = :vanilla
