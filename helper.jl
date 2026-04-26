@@ -90,8 +90,9 @@ function check_feasibility(
             activity += nonz_vals[k] * solution[idx]
         end
     
-        lhs = SCIP.SCIProwGetLhs(row)
-        rhs = SCIP.SCIProwGetRhs(row)
+        constant = SCIP.SCIProwGetConstant(row)
+        lhs = SCIP.SCIProwGetLhs(row) - constant
+        rhs = SCIP.SCIProwGetRhs(row) - constant
 
         if lhs > -SCIP.SCIPinfinity(scip) && activity < lhs - tolerance
             return false

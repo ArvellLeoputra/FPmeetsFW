@@ -1,5 +1,6 @@
 # LMO Builder from SCIP LP
 # TODO: Build LMO independently of SCIP LP
+# TODO: Multi heuristic calls
 function build_lmo_from_scip_lp(scip::Ptr{SCIP.SCIP_}, nvars, nrows)
     ptr_cols = SCIP.SCIPgetLPCols(scip)
     lp_cols = unsafe_wrap(Vector{Ptr{SCIP.SCIP_COL}}, ptr_cols, nvars)
@@ -9,6 +10,7 @@ function build_lmo_from_scip_lp(scip::Ptr{SCIP.SCIP_}, nvars, nrows)
 
     # Build LMO model
     opt_model = SCIP.Optimizer()
+    MOI.set(opt_model, MOI.RawOptimizerAttribute("presolving/maxrounds"), 0)
     MOI.set(opt_model, MOI.RawOptimizerAttribute("display/verblevel"), 0)
     x = MOI.add_variables(opt_model, nvars)
 
@@ -17,9 +19,13 @@ function build_lmo_from_scip_lp(scip::Ptr{SCIP.SCIP_}, nvars, nrows)
         col = lp_cols[j]
         var = SCIP.SCIPcolGetVar(col)
 
+        # TODO: Multi heuristic calls
         lb = SCIP.SCIPvarGetLbLocal(var)
         ub = SCIP.SCIPvarGetUbLocal(var)
 
+        if lb <= -SCIP.SCIPinfinity(scip) || ub >= SCIP.SCIPinfinity(scip)                                                                                                                                                                
+            println("  var $j: lb=$lb  ub=$ub  (UNBOUNDED)")                                                                                                                                                                              
+        end
         if lb > -SCIP.SCIPinfinity(scip)
             MOI.add_constraint(opt_model, x[j], MOI.GreaterThan(lb))
         end
@@ -29,6 +35,7 @@ function build_lmo_from_scip_lp(scip::Ptr{SCIP.SCIP_}, nvars, nrows)
     end
 
     # Add constraints
+    # TODO: Multi heuristic calls
     col_to_idx = Dict(lp_cols[k] => k for k in 1:nvars)
 
     for i in 1:nrows
