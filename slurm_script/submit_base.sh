@@ -1,10 +1,7 @@
 #!/bin/bash
 
-# Submit selected FP-FW combinations
-# manhattan: agnostic x {away, blended_pairwise}
-# euclidean: adaptive x {away, blended_pairwise, blended}
-# abssmooth: adaptive x {away, blended_pairwise, blended}
-# Total: 8 combinations
+# Submit base FP-FW variant: euclidean + away + adaptive
+# Sweeps 4 combinations of rand_round and warm_start
 
 PROJECT_DIR="/home/htc/aleoputra/project/FPmeetsFW"
 INSTANCE_DIR="$PROJECT_DIR/selection_benchmark"
@@ -16,25 +13,27 @@ if [ "$NUM_INSTANCES" -eq 0 ]; then
 fi
 echo "Found $NUM_INSTANCES instances in $INSTANCE_DIR"
 
-# Explicit list of (NORM, VARIANT, LS) combinations
-NORMS=("manhattan" "manhattan" "euclidean" "euclidean" "euclidean" "abssmooth" "abssmooth" "abssmooth")
-VARIANTS=("away" "blended_pairwise" "away" "blended_pairwise" "blended" "away" "blended_pairwise" "blended")
-LINESEARCHES=("agnostic" "agnostic" "adaptive" "adaptive" "adaptive" "adaptive" "adaptive" "adaptive")
+NORM="euclidean"
+VARIANT="away"
+LS="adaptive"
 
-for i in "${!NORMS[@]}"; do
-    NORM="${NORMS[$i]}"
-    VARIANT="${VARIANTS[$i]}"
-    LS="${LINESEARCHES[$i]}"
-    NAME="${NORM}_${VARIANT}_${LS}"
+# (rand_round, warm_start) combinations
+RR_VALUES=("false" "true"  "false" "true")
+WS_VALUES=("false" "false" "true"  "true")
 
-    OUT_DIR="$PROJECT_DIR/run_selected/$NAME/output"
-    ERR_DIR="$PROJECT_DIR/run_selected/$NAME/error"
+for i in "${!RR_VALUES[@]}"; do
+    RR="${RR_VALUES[$i]}"
+    WS="${WS_VALUES[$i]}"
+    NAME="${NORM}_${VARIANT}_${LS}_rr${RR}_ws${WS}"
+
+    OUT_DIR="$PROJECT_DIR/run_focused/$NAME/output"
+    ERR_DIR="$PROJECT_DIR/run_focused/$NAME/error"
     rm -rf "$OUT_DIR" "$ERR_DIR"
     mkdir -p "$OUT_DIR" "$ERR_DIR"
 
     sbatch <<EOF || { echo "ERROR: sbatch failed for $NAME"; continue; }
 #!/bin/bash
-#SBATCH --job-name=fpfw_${NORM}_${VARIANT}_${LS}
+#SBATCH --job-name=fpfw_focused_rr${RR}_ws${WS}
 #SBATCH --time=20:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -57,10 +56,10 @@ INSTANCE_PATH="$INSTANCE_DIR/\$INSTANCE"
 echo "Running instance: \$INSTANCE_PATH"
 echo "SLURM task ID: \${SLURM_ARRAY_TASK_ID}"
 
-julia --project=$PROJECT_DIR $PROJECT_DIR/run_test.jl "\$INSTANCE_PATH" $NORM $VARIANT $LS
+julia --project=$PROJECT_DIR $PROJECT_DIR/run_test.jl "\$INSTANCE_PATH" $NORM $VARIANT $LS $RR $WS
 EOF
 
     echo "Submitted: $NAME"
 done
 
-echo "All ${#NORMS[@]} combinations submitted (${NUM_INSTANCES} instances each)."
+echo "All ${#RR_VALUES[@]} combinations submitted (${NUM_INSTANCES} instances each)."

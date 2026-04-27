@@ -16,29 +16,29 @@ echo "Found $NUM_INSTANCES instances in $INSTANCE_DIR"
 NORMS=("manhattan" "euclidean" "abssmooth" "euclidean" "euclidean" "abssmooth" "abssmooth")
 LINESEARCHES=("agnostic" "agnostic" "agnostic" "adaptive" "secant" "adaptive" "secant")
 VARIANTS=("vanilla" "away" "blended_pairwise" "blended")
-PRESOLVES=("false" "true")
 
-for PRESOLVE in "${PRESOLVES[@]}"; do
-    for i in "${!NORMS[@]}"; do
-        NORM="${NORMS[$i]}"
-        LS="${LINESEARCHES[$i]}"
+submitted=0
 
-        for VARIANT in "${VARIANTS[@]}"; do
-            # blended (BCG) requires curvature-aware line search; skip incompatible pairs
-            if [ "$VARIANT" = "blended" ] && { [ "$LS" = "agnostic" ] || [ "$LS" = "secant" ]; }; then
-                continue
-            fi
+for i in "${!NORMS[@]}"; do
+    NORM="${NORMS[$i]}"
+    LS="${LINESEARCHES[$i]}"
 
-            NAME="${NORM}_${VARIANT}_${LS}_presolve_${PRESOLVE}"
+    for VARIANT in "${VARIANTS[@]}"; do
+        # blended (BCG) requires curvature-aware line search; skip incompatible pairs
+        if [ "$VARIANT" = "blended" ] && { [ "$LS" = "agnostic" ] || [ "$LS" = "secant" ]; }; then
+            continue
+        fi
 
-            OUT_DIR="$PROJECT_DIR/run/$NAME/output"
-            ERR_DIR="$PROJECT_DIR/run/$NAME/error"
-            rm -rf "$OUT_DIR" "$ERR_DIR"
-            mkdir -p "$OUT_DIR" "$ERR_DIR"
+        NAME="${NORM}_${VARIANT}_${LS}"
 
-            sbatch <<EOF || { echo "ERROR: sbatch failed for $NAME"; continue; }
+        OUT_DIR="$PROJECT_DIR/run/$NAME/output"
+        ERR_DIR="$PROJECT_DIR/run/$NAME/error"
+        rm -rf "$OUT_DIR" "$ERR_DIR"
+        mkdir -p "$OUT_DIR" "$ERR_DIR"
+
+        sbatch <<EOF || { echo "ERROR: sbatch failed for $NAME"; continue; }
 #!/bin/bash
-#SBATCH --job-name=fpfw_${NORM}_${VARIANT}_${LS}_${PRESOLVE}
+#SBATCH --job-name=fpfw_${NORM}_${VARIANT}_${LS}
 #SBATCH --time=20:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -61,12 +61,13 @@ INSTANCE_PATH="$INSTANCE_DIR/\$INSTANCE"
 echo "Running instance: \$INSTANCE_PATH"
 echo "SLURM task ID: \${SLURM_ARRAY_TASK_ID}"
 
-julia --project=$PROJECT_DIR $PROJECT_DIR/run_test.jl "\$INSTANCE_PATH" $NORM 0.5 $VARIANT $LS $PRESOLVE
+julia --project=$PROJECT_DIR $PROJECT_DIR/run_test.jl "\$INSTANCE_PATH" $NORM $VARIANT $LS
 EOF
 
+            submitted=$((submitted + 1))
             echo "Submitted: $NAME"
         done
     done
 done
 
-echo "All $((${#NORMS[@]} * ${#VARIANTS[@]} * ${#PRESOLVES[@]})) jobs submitted (${NUM_INSTANCES} instances each)."
+echo "All $submitted jobs submitted (${NUM_INSTANCES} instances each)."
