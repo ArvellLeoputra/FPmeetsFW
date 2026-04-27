@@ -41,13 +41,17 @@ until x is integral or time limit / max iterations
 ## Usage
 
 ```bash
-julia --project run_test.jl <instance.mps> [euclidean|manhattan|abssmooth] [threshold] [vanilla|away|blended_pairwise|blended] [agnostic|backtracking|secant|adaptive] [true|false]
+julia --project run_test.jl <instance.mps> [euclidean|manhattan|abssmooth] [vanilla|away|blended_pairwise|blended] [agnostic|backtracking|secant|adaptive] [rand_round=true|false] [warm_start=true|false]
 ```
+
+All arguments after `instance.mps` are optional and fall back to the defaults in `dependencies.jl`.
 
 Examples:
 ```bash
-julia --project run_test.jl ./testcase/test1.mps euclidean 0.5 vanilla secant false
-julia --project run_test.jl ./testcase/test1.mps manhattan 0.47 away agnostic true
+julia --project run_test.jl ./testcase/test1.mps
+julia --project run_test.jl ./testcase/test1.mps euclidean away adaptive
+julia --project run_test.jl ./testcase/test1.mps euclidean away adaptive true false
+julia --project run_test.jl ./testcase/test1.mps manhattan away agnostic false true
 ```
 
 ## Parameters
@@ -64,8 +68,10 @@ Configurable in `dependencies.jl`:
 | `DEF_PERTURB_FRACTION` | 0.2 | Fraction of binary vars to flip on cycle restart |
 | `DEF_MAX_RESTARTS` | 1000 | Max restarts after cycle detection |
 | `DEF_ROUNDING_THRESHOLD` | 0.5 | Threshold for rounding fractional values to 1 |
-| `DEF_FW_VARIANT` | `:vanilla` | FW variant (`:vanilla`, `:away`, `:blended_pairwise`, `:blended`) |
-| `DEF_LINE_SEARCH` | `:agnostic` | Line search (`:agnostic`, `:backtracking`, `:secant`, `:adaptive`) |
+| `DEF_FW_VARIANT` | `:away` | FW variant (`:vanilla`, `:away`, `:blended_pairwise`, `:blended`) |
+| `DEF_LINE_SEARCH` | `:adaptive` | Line search (`:agnostic`, `:backtracking`, `:secant`, `:adaptive`) |
+| `DEF_RAND_ROUND` | `true` | Enable randomized rounding before each FP iteration |
+| `DEF_WARM_START` | `true` | Warm-start FW active set across FP iterations |
 | `DEF_RANDOM_SEED` | `42` | Random seed for reproducibility (`nothing` to disable) |
 | `DEF_PRESOLVE` | `false` | Whether to enable SCIP presolving before the heuristic |
 | `DEBUG_VERBOSE` | `false` | Print detailed per-iteration output |
@@ -79,10 +85,17 @@ Configurable in `dependencies.jl`:
 ## File Structure
 
 ```
-├── run_test.jl      # Entry point
-├── dependencies.jl  # Parameters and type definitions
-├── fpfwheur.jl      # Main FPFW heuristic implementation
-├── lmo_builder.jl   # Builds Linear Minimization Oracle from SCIP LP
-├── helper.jl        # Utility functions
-└── scip_setup.jl    # SCIP configuration
+├── run_test.jl          # Entry point (single run)
+├── dependencies.jl      # Parameters and type definitions
+├── fpfwheur.jl          # Main FPFW heuristic implementation
+├── lmo_builder.jl       # Builds Linear Minimization Oracle from SCIP LP
+├── helper.jl            # Utility functions
+├── scip_setup.jl        # SCIP configuration
+└── slurm_script/
+    ├── submit_all.sh    # Submit all 23 norm/variant/linesearch combinations
+    ├── submit_selected.sh  # Submit 8 curated combinations
+    ├── submit_focused.sh   # Submit euclidean+away+adaptive with RR/WS ablation
+    ├── check_all.sh     # Parse and summarize results from submit_all
+    ├── check_selected.sh   # Parse and summarize results from submit_selected
+    └── check_focused.sh    # Parse and summarize results from submit_focused
 ```
