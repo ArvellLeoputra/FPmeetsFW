@@ -11,8 +11,7 @@ DEF_SCIP_TIME_LIMIT=$(grep 'const DEF_SCIP_TIME_LIMIT' "$BASE_DIR/dependencies.j
 NORMS=("manhattan" "euclidean" "abssmooth" "euclidean" "euclidean" "abssmooth" "abssmooth")
 LINESEARCHES=("agnostic" "agnostic" "agnostic" "adaptive" "secant" "adaptive" "secant")
 VARIANTS=("vanilla" "away" "blended_pairwise" "blended")
-PRESOLVES=("false" "true")
-N_COMBINATIONS_TOTAL=$(( ${#NORMS[@]} * ${#VARIANTS[@]} * ${#PRESOLVES[@]} ))
+N_COMBINATIONS_TOTAL=$(( ${#NORMS[@]} * ${#VARIANTS[@]} ))
 
 # Combined CSV and summary across all runs
 COMBINED_CSV="$BASE_DIR/run/comparison.csv"
@@ -43,21 +42,18 @@ grand_failed_ginteger=0
 grand_rr_found=0
 
 # Clean up previous check_all.sh outputs before re-running
-for PRESOLVE in "${PRESOLVES[@]}"; do
-    for i in "${!NORMS[@]}"; do
-        for VARIANT in "${VARIANTS[@]}"; do
-            if [ "$VARIANT" = "blended" ] && { [ "${LINESEARCHES[$i]}" = "agnostic" ] || [ "${LINESEARCHES[$i]}" = "secant" ]; }; then
-                continue
-            fi
-            rm -rf "$BASE_DIR/run/${NORMS[$i]}_${VARIANT}_${LINESEARCHES[$i]}_presolve_${PRESOLVE}/result"
-        done
+for i in "${!NORMS[@]}"; do
+    for VARIANT in "${VARIANTS[@]}"; do
+        if [ "$VARIANT" = "blended" ] && { [ "${LINESEARCHES[$i]}" = "agnostic" ] || [ "${LINESEARCHES[$i]}" = "secant" ]; }; then
+            continue
+        fi
+        rm -rf "$BASE_DIR/run/${NORMS[$i]}_${VARIANT}_${LINESEARCHES[$i]}/result"
     done
 done
 
-CSV_HEADER="ID,Instance,BinaryVars,IntegerVars,SolutionFound,TotalTime,FPIterations,FWIterations,Restarts,Objective,Gap,FailureReason,FailureType,ProjectionNorm,FWVariant,LineSearch,RoundingThreshold,Presolve"
+CSV_HEADER="ID,Instance,BinaryVars,IntegerVars,SolutionFound,TotalTime,FPIterations,FWIterations,Restarts,Objective,Gap,FailureReason,FailureType,ProjectionNorm,FWVariant,LineSearch,RoundingThreshold"
 echo "$CSV_HEADER" > "$COMBINED_CSV"
 
-for PRESOLVE in "${PRESOLVES[@]}"; do
 for i in "${!NORMS[@]}"; do
     NORM="${NORMS[$i]}"
     LS="${LINESEARCHES[$i]}"
@@ -68,7 +64,7 @@ for i in "${!NORMS[@]}"; do
             continue
         fi
 
-        NAME="${NORM}_${VARIANT}_${LS}_presolve_${PRESOLVE}"
+        NAME="${NORM}_${VARIANT}_${LS}"
 
         OUTPUT_DIR="$BASE_DIR/run/$NAME/output"
         ERROR_DIR="$BASE_DIR/run/$NAME/error"
@@ -86,7 +82,7 @@ for i in "${!NORMS[@]}"; do
         echo "==========================================================" >> "$SUMMARY_FILE"
         echo "" >> "$SUMMARY_FILE"
 
-        rounding_threshold=$(grep "Rounding thresh:" "$(ls "$OUTPUT_DIR"/job_*_*.out 2>/dev/null | head -1)" 2>/dev/null | head -1 | awk '{print $NF}')
+        rounding_threshold=$(grep "Rounding threshold:" "$(ls "$OUTPUT_DIR"/job_*_*.out 2>/dev/null | head -1)" 2>/dev/null | head -1 | awk '{print $NF}')
 
         echo "DETAILED RESULTS" > "$DETAILED_FILE"
         echo "==========================================================" >> "$DETAILED_FILE"
@@ -94,7 +90,6 @@ for i in "${!NORMS[@]}"; do
         echo "  FW variant:         $VARIANT" >> "$DETAILED_FILE"
         echo "  Line search:        $LS" >> "$DETAILED_FILE"
         echo "  Rounding threshold: $rounding_threshold" >> "$DETAILED_FILE"
-        echo "  Presolve:           $PRESOLVE" >> "$DETAILED_FILE"
         echo "==========================================================" >> "$DETAILED_FILE"
         echo "" >> "$DETAILED_FILE"
 
@@ -162,7 +157,7 @@ for i in "${!NORMS[@]}"; do
             fi
             fw_variant=$(grep "FW variant:" "$output_file" | head -1 | awk '{print $NF}')
             line_search=$(grep "Line search:" "$output_file" | head -1 | awk '{print $NF}')
-            rounding_threshold=$(grep "Rounding thresh:" "$output_file" | head -1 | awk '{print $NF}')
+            rounding_threshold=$(grep "Rounding threshold:" "$output_file" | head -1 | awk '{print $NF}')
 
             # Parse exit reason from summary output
             exit_reason_str=$(grep "Exit reason:" "$output_file" | tail -1 | sed 's/Exit reason:[[:space:]]*//')
@@ -185,7 +180,7 @@ for i in "${!NORMS[@]}"; do
 
             # Extract performance metrics
             binary_vars=$(grep "Binary variables:" "$output_file" | tail -1 | awk '{print $NF}')
-            integer_vars=$(grep "General integer variables:" "$output_file" | tail -1 | awk '{print $NF}')
+            integer_vars=$(grep "G integer variables:" "$output_file" | tail -1 | awk '{print $NF}')
             INSTANCE_BINVARS["$instance_name"]="$binary_vars"
             INSTANCE_INTVARS["$instance_name"]="${integer_vars:-0}"
             total_time=$(grep "Total time:" "$output_file" | tail -1 | awk '{print $3}')
@@ -285,10 +280,10 @@ for i in "${!NORMS[@]}"; do
             fi
 
             # Write to individual CSV
-            echo "${task_id},${instance_name},${binary_vars},${integer_vars},${solution_found},${total_time},${fp_iterations},${fw_iterations},${restarts},${objective},${gap},${failure_reason},${failure_type},${projection_norm},${fw_variant},${line_search},${rounding_threshold},${PRESOLVE}" >> "$CSV_FILE"
+            echo "${task_id},${instance_name},${binary_vars},${integer_vars},${solution_found},${total_time},${fp_iterations},${fw_iterations},${restarts},${objective},${gap},${failure_reason},${failure_type},${projection_norm},${fw_variant},${line_search},${rounding_threshold}" >> "$CSV_FILE"
 
             # Write to combined CSV
-            echo "${task_id},${instance_name},${binary_vars},${integer_vars},${solution_found},${total_time},${fp_iterations},${fw_iterations},${restarts},${objective},${gap},${failure_reason},${failure_type},${projection_norm},${fw_variant},${line_search},${rounding_threshold},${PRESOLVE}" >> "$COMBINED_CSV"
+            echo "${task_id},${instance_name},${binary_vars},${integer_vars},${solution_found},${total_time},${fp_iterations},${fw_iterations},${restarts},${objective},${gap},${failure_reason},${failure_type},${projection_norm},${fw_variant},${line_search},${rounding_threshold}" >> "$COMBINED_CSV"
 
             # Write to detailed file
             echo "Instance: ${instance_name} (ID:${task_id})" >> "$DETAILED_FILE"
@@ -416,7 +411,6 @@ for i in "${!NORMS[@]}"; do
         grand_rr_found=$((grand_rr_found + rr_found_count))
     done
 done
-done
 
 # ── Generate benchmark_summary.txt ───────────────────────────────────────────
 {
@@ -425,18 +419,18 @@ echo "Generated: $(date)"
 N_COMBINATIONS_RAN=${#SUMMARY_NAMES[@]}
 echo "Instances: $(( grand_total / N_COMBINATIONS_RAN )) per combination | Combinations ran: $N_COMBINATIONS_RAN / $N_COMBINATIONS_TOTAL"
 echo ""
-printf "%-65s %7s %7s %7s %7s\n" "Combination (norm_variant_linesearch_presolve)" "Success" "Failed" "Total" "Rate(%)"
-echo "------------------------------------------------------------------------------------------------"
+printf "%-55s %7s %7s %7s %7s\n" "Combination (norm_variant_linesearch)" "Success" "Failed" "Total" "Rate(%)"
+echo "----------------------------------------------------------------------------------------"
 for j in "${!SUMMARY_NAMES[@]}"; do
     rate=$(awk -v s="${SUMMARY_SUCCESS[$j]}" -v t="${SUMMARY_TOTAL[$j]}" \
         'BEGIN {if(t>0) printf "%.1f", (s/t)*100; else print "0.0"}')
-    printf "%-65s %7d %7d %7d %7s\n" \
+    printf "%-55s %7d %7d %7d %7s\n" \
         "${SUMMARY_NAMES[$j]}" "${SUMMARY_SUCCESS[$j]}" "${SUMMARY_FAILED[$j]}" "${SUMMARY_TOTAL[$j]}" "$rate"
 done
 overall_rate=$(awk -v s="$grand_success" -v t="$grand_total" \
     'BEGIN {if(t>0) printf "%.1f", (s/t)*100; else print "0.0"}')
-echo "------------------------------------------------------------------------------------------------"
-printf "%-65s %7d %7d %7d %7s\n" "TOTAL" "$grand_success" "$grand_failed" "$grand_total" "$overall_rate"
+echo "----------------------------------------------------------------------------------------"
+printf "%-55s %7d %7d %7d %7s\n" "TOTAL" "$grand_success" "$grand_failed" "$grand_total" "$overall_rate"
 echo ""
 echo "SOLUTION METHOD BREAKDOWN (across all combinations)"
 echo "-----------------------------------------------------"

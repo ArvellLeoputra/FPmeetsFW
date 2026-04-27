@@ -8,8 +8,6 @@ BASE_DIR="/home/htc/aleoputra/project/FPmeetsFW"
 DEF_GLOBAL_TIME_LIMIT=$(grep 'const DEF_GLOBAL_TIME_LIMIT' "$BASE_DIR/dependencies.jl" | grep -oE '[0-9]+(\.[0-9]+)?')
 DEF_SCIP_TIME_LIMIT=$(grep 'const DEF_SCIP_TIME_LIMIT' "$BASE_DIR/dependencies.jl" | grep -oE '[0-9]+(\.[0-9]+)?')
 
-PRESOLVE="true"
-
 # Explicit list of (NORM, VARIANT, LS) combinations — must match submit_selected.sh
 NORMS=("manhattan" "manhattan" "euclidean" "euclidean" "euclidean" "abssmooth" "abssmooth" "abssmooth")
 VARIANTS=("away" "blended_pairwise" "away" "blended_pairwise" "blended" "away" "blended_pairwise" "blended")
@@ -47,17 +45,17 @@ grand_rr_found=0
 
 # Clean up previous outputs before re-running
 for i in "${!NORMS[@]}"; do
-    rm -rf "$BASE_DIR/run_selected/${NORMS[$i]}_${VARIANTS[$i]}_${LINESEARCHES[$i]}_presolve_${PRESOLVE}/result"
+    rm -rf "$BASE_DIR/run_selected/${NORMS[$i]}_${VARIANTS[$i]}_${LINESEARCHES[$i]}/result"
 done
 
-CSV_HEADER="ID,Instance,BinaryVars,IntegerVars,SolutionFound,TotalTime,FPIterations,FWIterations,Restarts,Objective,Gap,FailureReason,FailureType,ProjectionNorm,FWVariant,LineSearch,RoundingThreshold,Presolve"
+CSV_HEADER="ID,Instance,BinaryVars,IntegerVars,SolutionFound,TotalTime,FPIterations,FWIterations,Restarts,Objective,Gap,FailureReason,FailureType,ProjectionNorm,FWVariant,LineSearch,RoundingThreshold"
 echo "$CSV_HEADER" > "$COMBINED_CSV"
 
 for i in "${!NORMS[@]}"; do
     NORM="${NORMS[$i]}"
     VARIANT="${VARIANTS[$i]}"
     LS="${LINESEARCHES[$i]}"
-    NAME="${NORM}_${VARIANT}_${LS}_presolve_${PRESOLVE}"
+    NAME="${NORM}_${VARIANT}_${LS}"
 
     OUTPUT_DIR="$BASE_DIR/run_selected/$NAME/output"
     RESULT_DIR="$BASE_DIR/run_selected/$NAME/result"
@@ -74,7 +72,7 @@ for i in "${!NORMS[@]}"; do
     echo "==========================================================" >> "$SUMMARY_FILE"
     echo "" >> "$SUMMARY_FILE"
 
-    rounding_threshold=$(grep "Rounding thresh:" "$(ls "$OUTPUT_DIR"/job_*_*.out 2>/dev/null | head -1)" 2>/dev/null | head -1 | awk '{print $NF}')
+    rounding_threshold=$(grep "Rounding threshold:" "$(ls "$OUTPUT_DIR"/job_*_*.out 2>/dev/null | head -1)" 2>/dev/null | head -1 | awk '{print $NF}')
 
     echo "DETAILED RESULTS" > "$DETAILED_FILE"
     echo "==========================================================" >> "$DETAILED_FILE"
@@ -82,7 +80,6 @@ for i in "${!NORMS[@]}"; do
     echo "  FW variant:         $VARIANT" >> "$DETAILED_FILE"
     echo "  Line search:        $LS" >> "$DETAILED_FILE"
     echo "  Rounding threshold: $rounding_threshold" >> "$DETAILED_FILE"
-    echo "  Presolve:           $PRESOLVE" >> "$DETAILED_FILE"
     echo "==========================================================" >> "$DETAILED_FILE"
     echo "" >> "$DETAILED_FILE"
 
@@ -145,7 +142,7 @@ for i in "${!NORMS[@]}"; do
         if [ -z "$projection_norm" ]; then projection_norm="$NORM"; fi
         fw_variant=$(grep "FW variant:" "$output_file" | head -1 | awk '{print $NF}')
         line_search=$(grep "Line search:" "$output_file" | head -1 | awk '{print $NF}')
-        rounding_threshold=$(grep "Rounding thresh:" "$output_file" | head -1 | awk '{print $NF}')
+        rounding_threshold=$(grep "Rounding threshold:" "$output_file" | head -1 | awk '{print $NF}')
 
         # Parse exit reason
         exit_reason_str=$(grep "Exit reason:" "$output_file" | tail -1 | sed 's/Exit reason:[[:space:]]*//')
@@ -168,7 +165,7 @@ for i in "${!NORMS[@]}"; do
 
         # Extract performance metrics
         binary_vars=$(grep "Binary variables:" "$output_file" | tail -1 | awk '{print $NF}')
-        integer_vars=$(grep "General integer variables:" "$output_file" | tail -1 | awk '{print $NF}')
+        integer_vars=$(grep "G integer variables:" "$output_file" | tail -1 | awk '{print $NF}')
         INSTANCE_BINVARS["$instance_name"]="$binary_vars"
         INSTANCE_INTVARS["$instance_name"]="${integer_vars:-0}"
         total_time=$(grep "Total time:" "$output_file" | tail -1 | awk '{print $3}')
@@ -253,8 +250,8 @@ for i in "${!NORMS[@]}"; do
         fi
 
         # Write to CSVs
-        echo "${task_id},${instance_name},${binary_vars},${integer_vars},${solution_found},${total_time},${fp_iterations},${fw_iterations},${restarts},${objective},${gap},${failure_reason},${failure_type},${projection_norm},${fw_variant},${line_search},${rounding_threshold},${PRESOLVE}" >> "$CSV_FILE"
-        echo "${task_id},${instance_name},${binary_vars},${integer_vars},${solution_found},${total_time},${fp_iterations},${fw_iterations},${restarts},${objective},${gap},${failure_reason},${failure_type},${projection_norm},${fw_variant},${line_search},${rounding_threshold},${PRESOLVE}" >> "$COMBINED_CSV"
+        echo "${task_id},${instance_name},${binary_vars},${integer_vars},${solution_found},${total_time},${fp_iterations},${fw_iterations},${restarts},${objective},${gap},${failure_reason},${failure_type},${projection_norm},${fw_variant},${line_search},${rounding_threshold}" >> "$CSV_FILE"
+        echo "${task_id},${instance_name},${binary_vars},${integer_vars},${solution_found},${total_time},${fp_iterations},${fw_iterations},${restarts},${objective},${gap},${failure_reason},${failure_type},${projection_norm},${fw_variant},${line_search},${rounding_threshold}" >> "$COMBINED_CSV"
 
         # Write to detailed file
         echo "Instance: ${instance_name} (ID:${task_id})" >> "$DETAILED_FILE"
@@ -380,18 +377,18 @@ echo "FPFW Benchmark Summary (Selected Combinations)"
 echo "Generated: $(date)"
 echo "Instances: $(( grand_total / N_COMBINATIONS )) per combination | Total combinations: $N_COMBINATIONS"
 echo ""
-printf "%-65s %7s %7s %7s %7s\n" "Combination (norm_variant_linesearch_presolve)" "Success" "Failed" "Total" "Rate(%)"
-echo "------------------------------------------------------------------------------------------------"
+printf "%-55s %7s %7s %7s %7s\n" "Combination (norm_variant_linesearch)" "Success" "Failed" "Total" "Rate(%)"
+echo "----------------------------------------------------------------------------------------"
 for j in "${!SUMMARY_NAMES[@]}"; do
     rate=$(awk -v s="${SUMMARY_SUCCESS[$j]}" -v t="${SUMMARY_TOTAL[$j]}" \
         'BEGIN {if(t>0) printf "%.1f", (s/t)*100; else print "0.0"}')
-    printf "%-65s %7d %7d %7d %7s\n" \
+    printf "%-55s %7d %7d %7d %7s\n" \
         "${SUMMARY_NAMES[$j]}" "${SUMMARY_SUCCESS[$j]}" "${SUMMARY_FAILED[$j]}" "${SUMMARY_TOTAL[$j]}" "$rate"
 done
 overall_rate=$(awk -v s="$grand_success" -v t="$grand_total" \
     'BEGIN {if(t>0) printf "%.1f", (s/t)*100; else print "0.0"}')
-echo "------------------------------------------------------------------------------------------------"
-printf "%-65s %7d %7d %7d %7s\n" "TOTAL" "$grand_success" "$grand_failed" "$grand_total" "$overall_rate"
+echo "----------------------------------------------------------------------------------------"
+printf "%-55s %7d %7d %7d %7s\n" "TOTAL" "$grand_success" "$grand_failed" "$grand_total" "$overall_rate"
 echo ""
 echo "SOLUTION METHOD BREAKDOWN (across all combinations)"
 echo "-----------------------------------------------------"
