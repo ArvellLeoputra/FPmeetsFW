@@ -16,6 +16,8 @@ mutable struct FPFWHeuristic <: SCIP.Heuristic
     rounding_threshold::Float64
     fw_variant::Symbol      # :vanilla, :away, :blended_pairwise, :blended
     line_search::Symbol     # :agnostic, :backtracking, :secant, :adaptive
+    rand_round::Bool                                                                                                                                                                                                                  
+    warm_start::Bool 
     global_start_time::Float64
 end
 
@@ -33,6 +35,14 @@ mutable struct FPFWStats
     final_objective::Union{Nothing, Float64}
 
     FPFWStats() = new(0.0, 0.0, 0.0, 0, 0, 0, false, :none, nothing, 0.0, nothing)
+end
+
+struct FPFWConfig
+    projection_norm::Symbol                                                                                                                                                                                                  
+    fw_variant::Symbol                                                                                                                                                                                                            
+    line_search::Symbol                                                                                                                                                                                                         
+    rand_round::Bool                                                                                                                                                                                                            
+    warm_start::Bool
 end
 
 # Default tolerance for feasibility/integrality checks and FW convergence
@@ -58,18 +68,22 @@ const DEF_RANDOM_SEED::Union{Nothing, Int} = 42
 # Rounding threshold for deciding when to round fractional solutions;
 const DEF_ROUNDING_THRESHOLD = 0.5
 
-# Randomized rounding pre-check: n_attempts = div(n_integers, DEF_RAND_ROUND_DIVISOR)
+# Randomized rounding: n_attempts = div(n_integers, DEF_RAND_ROUND_DIVISOR)
+const DEF_RAND_ROUND = true
 const DEF_RAND_ROUND_DIVISOR = 2
 const DEF_RR_TIME_LIMIT = 5.0
 
+# Warm-starting away/blended variants with the previous iteration's active set
+const DEF_WARM_START = true
+
 # Frank-Wolfe variant: :vanilla, :away, :blended_pairwise, :blended
-const DEF_FW_VARIANT = :vanilla
+const DEF_FW_VARIANT = :away
 
 # Frank-Wolfe line search: :agnostic, :backtracking, :secant, :adaptive
-const DEF_LINE_SEARCH = :agnostic
+const DEF_LINE_SEARCH = :adaptive
 
 # Debug mode: set to true to print detailed step-by-step output
 const DEBUG_VERBOSE = false
 
 # Determine whether presolve on or off
-const DEF_PRESOLVE = false
+const DEF_PRESOLVE = true

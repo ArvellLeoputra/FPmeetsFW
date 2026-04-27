@@ -13,6 +13,20 @@ function call_fw_variant(variant::Symbol, f, grad!, lmo, x0; kwargs...)
     end
 end
 
+function call_fw_variant(variant::Symbol, f, grad!, lmo, active_set::FrankWolfe.ActiveSet; kwargs...)                                                                                                                             
+      if variant == :vanilla                                                                                                                                                                                                      
+          error("Vanilla FW variant does not have an active set.")
+      elseif variant == :away                                                                                                                                                                                                       
+          FrankWolfe.away_frank_wolfe(f, grad!, lmo, active_set; kwargs...)
+      elseif variant == :blended_pairwise                                                                                                                                                                                           
+          FrankWolfe.blended_pairwise_conditional_gradient(f, grad!, lmo, active_set; kwargs...)                                                                                                                                  
+      elseif variant == :blended                                                                                                                                                                                                    
+          FrankWolfe.blended_conditional_gradient(f, grad!, lmo, active_set; kwargs...)
+      else                                                                                                                                                                                                                          
+          error("Unknown FW variant: $variant. Choose from :away, :blended_pairwise, :blended")                                                                                                                         
+      end                                                                                                                                                                                                                           
+  end
+
 # Main FPFW Heuristic Implementation
 function SCIP.find_primal_solution(
     scip::Ptr{SCIP.SCIP_},
@@ -177,6 +191,9 @@ function SCIP.find_primal_solution(
     x_after = zeros(Float64, nvars)  # Preallocated buffer for post-step x in callback
     x_temp  = zeros(Float64, nvars)  # Preallocated buffer for randomized rounding
 
+    # Active set for warm-starting away/blended variants
+    active_set = nothing             # Preallocate active set for warm-starting
+
     # Cycle detection: store hashes of all visited rounded solutions
     rounded_cache = Set{UInt64}()
 
@@ -222,41 +239,43 @@ function SCIP.find_primal_solution(
             break
         end
 
-        rr_iter_start = time()
-        for _ in 1:attempts
-            if time() - rr_iter_start > DEF_RR_TIME_LIMIT
-                break
-            end
-
-            for i in all_integers
-                frac = x[i] - floor(x[i])
-                x_temp[i] = rand() < frac ? ceil(x[i]) : floor(x[i])
-            end
-
-            if check_feasibility(scip, x_temp, col_to_idx)
-                if submit_solution_to_scip(scip, heur_ptr, lp_cols, x_temp, nvars)
-                    stats.solution_found = true
-                    stats.exit_reason = :rr_solution_found
-                    stats.iter_found_solution = iter
-                    stats.final_objective = sum(x_temp[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lp_cols[j])) for j in 1:nvars)
-                    result = SCIP.SCIP_FOUNDSOL
-
-                    if DEBUG_VERBOSE
-                        println()
-                        println("End solution:")
-                        for j in 1:nvars
-                            @printf("  x[%d] = %.3f\n", j, x_temp[j])
-                        end
-                    end
+        if heur.rand_round && iter > 1  # skip randomized rounding in the first iteration to save time
+            rr_iter_start = time()
+            for _ in 1:attempts
+                if time() - rr_iter_start > DEF_RR_TIME_LIMIT
                     break
                 end
-            end
-        end
 
-        stats.rr_time += time() - rr_iter_start
-            
-        if stats.solution_found
-            break
+                for i in all_integers
+                    frac = x[i] - floor(x[i])
+                    x_temp[i] = rand() < frac ? ceil(x[i]) : floor(x[i])
+                end
+
+                if check_feasibility(scip, x_temp, col_to_idx)
+                    if submit_solution_to_scip(scip, heur_ptr, lp_cols, x_temp, nvars)
+                        stats.solution_found = true
+                        stats.exit_reason = :rr_solution_found
+                        stats.iter_found_solution = iter
+                        stats.final_objective = sum(x_temp[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lp_cols[j])) for j in 1:nvars)
+                        result = SCIP.SCIP_FOUNDSOL
+
+                        if DEBUG_VERBOSE
+                            println()
+                            println("End solution:")
+                            for j in 1:nvars
+                                @printf("  x[%d] = %.3f\n", j, x_temp[j])
+                            end
+                        end
+                        break
+                    end
+                end
+            end
+
+            stats.rr_time += time() - rr_iter_start
+                
+            if stats.solution_found
+                break
+            end
         end
 
         stats.fp_iterations = iter
@@ -339,25 +358,46 @@ function SCIP.find_primal_solution(
         remaining_time = DEF_GLOBAL_TIME_LIMIT - (time() - heur.global_start_time)
         fw_start = time()
 
-        x_new, _ = call_fw_variant(
-            heur.fw_variant,
-            x -> f_proj(x, x_round),
-            (storage, x) -> g_proj(storage, x, x_round),
-            heur.lmo,
-            x,
-            max_iteration = DEF_FW_MAX_ITER,
-            verbose = false,
-            line_search = ls,
-            epsilon = DEF_FW_TOLERANCE,
-            callback = fw_callback,
-            timeout = remaining_time
-        )
+        fw_result = if heur.warm_start && active_set !== nothing && heur.fw_variant !== :vanilla
+            call_fw_variant(
+                heur.fw_variant,
+                x -> f_proj(x, x_round),
+                (storage, x) -> g_proj(storage, x, x_round),
+                heur.lmo,
+                active_set,
+                max_iteration = DEF_FW_MAX_ITER,
+                verbose = false,
+                line_search = ls,
+                epsilon = DEF_FW_TOLERANCE,
+                callback = fw_callback,
+                timeout = remaining_time
+            )
+        else
+            call_fw_variant(
+                heur.fw_variant,
+                x -> f_proj(x, x_round),
+                (storage, x) -> g_proj(storage, x, x_round),
+                heur.lmo,
+                x,
+                max_iteration = DEF_FW_MAX_ITER,
+                verbose = false,
+                line_search = ls,
+                epsilon = DEF_FW_TOLERANCE,
+                callback = fw_callback,
+                timeout = remaining_time
+            )
+        end
+
+        x_new = fw_result.x
+        if heur.warm_start && heur.fw_variant !== :vanilla
+            active_set = fw_result.active_set
+        end
 
         stats.fw_time += time() - fw_start
         fw_iters = length(fw_traj)
         stats.fw_iterations += fw_iters
 
-        # Check time limit after FW returns (may have timed out mid-run)
+        # Check time limit after FW returns
         if time() - heur.global_start_time > DEF_GLOBAL_TIME_LIMIT
             stats.exit_reason = :time_limit
             break

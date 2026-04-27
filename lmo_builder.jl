@@ -23,9 +23,10 @@ function build_lmo_from_scip_lp(scip::Ptr{SCIP.SCIP_}, nvars, nrows)
         lb = SCIP.SCIPvarGetLbLocal(var)
         ub = SCIP.SCIPvarGetUbLocal(var)
 
-        if lb <= -SCIP.SCIPinfinity(scip) || ub >= SCIP.SCIPinfinity(scip)                                                                                                                                                                
-            println("  var $j: lb=$lb  ub=$ub  (UNBOUNDED)")                                                                                                                                                                              
-        end
+        # if lb <= -SCIP.SCIPinfinity(scip) || ub >= SCIP.SCIPinfinity(scip)                                                                                                                                                                
+        #     println("  var $j: lb=$lb  ub=$ub  (UNBOUNDED)")                                                                                                                                                                              
+        # end
+        
         if lb > -SCIP.SCIPinfinity(scip)
             MOI.add_constraint(opt_model, x[j], MOI.GreaterThan(lb))
         end

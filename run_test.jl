@@ -4,8 +4,8 @@ include("helper.jl")
 include("fpfwheur.jl")
 include("lmo_builder.jl")
 
-function mps_test_model(filename::String, projection_norm::Symbol, rounding_threshold::Float64, fw_variant::Symbol, line_search::Symbol, presolve::Bool, global_start_time::Float64)
-    model = minimal_setup(presolve=presolve)
+function mps_test_model(filename::String, config::FPFWConfig, global_start_time::Float64)
+    model = minimal_setup(presolve=DEF_PRESOLVE)
     backend = JuMP.unsafe_backend(model)
     scip = backend.inner
 
@@ -16,22 +16,45 @@ function mps_test_model(filename::String, projection_norm::Symbol, rounding_thre
     orig_vars = unsafe_wrap(Vector{Ptr{SCIP.SCIP_VAR}}, SCIP.SCIPgetOrigVars(scip), nvars_orig)
     n_orig_binary = sum(SCIP.SCIPvarGetType(orig_vars[j]) == SCIP.SCIP_VARTYPE_BINARY for j in 1:nvars_orig)
     n_orig_integer = sum(SCIP.SCIPvarGetType(orig_vars[j]) == SCIP.SCIP_VARTYPE_INTEGER for j in 1:nvars_orig)
+    n_orig_continuous = nvars_orig - n_orig_binary - n_orig_integer                                                                                                                                                                   
 
     println("="^80)
     println("RUN INFO")
     println("="^80)
-    println("Instance:                  $(basename(filename))")
-    println("Total variables:           $nvars_orig")
-    println("Binary variables:          $n_orig_binary")
-    println("General integer variables: $n_orig_integer")
-    println("Projection norm:           $projection_norm")
-    println("Rounding thresh:           $rounding_threshold")
-    println("FW variant:                $fw_variant")
-    println("Line search:               $line_search")
-    println("Presolve:                  $presolve")
+    println("Instance:               $(basename(filename))")
+    println("Total variables:        $nvars_orig")
+    println("Binary variables:       $n_orig_binary")
+    println("G integer variables:    $n_orig_integer")
+    println("Continuous variables:   $n_orig_continuous")
+    println("Presolve:               $(DEF_PRESOLVE ? "enabled" : "disabled")")
     println("="^80)
 
-    heur = FPFWHeuristic(n_orig_binary, n_orig_integer, 0, nothing, projection_norm, rounding_threshold, fw_variant, line_search, global_start_time)
+    println()
+    println("="^80)
+    println("HEURISTIC CONFIGURATION")
+    println("="^80)
+    println("Projection norm:        $(config.projection_norm)")
+    println("FW variant:             $(config.fw_variant)")
+    println("Line search:            $(config.line_search)")
+    println("Randomized rounding:    $(config.rand_round ? "enabled" : "disabled")")
+    println("Warm start:             $(config.warm_start ? "enabled" : "disabled")")
+    println("Rounding threshold:     $DEF_ROUNDING_THRESHOLD")
+    println("="^80)
+
+    heur = FPFWHeuristic(
+        n_orig_binary,
+        n_orig_integer,
+        0,
+        nothing,
+        config.projection_norm,
+        DEF_ROUNDING_THRESHOLD,
+        config.fw_variant,
+        config.line_search,
+        config.rand_round,
+        config.warm_start,
+        global_start_time
+    )
+
     SCIP.include_heuristic(
         backend,
         heur,
@@ -62,7 +85,7 @@ function mps_test_model(filename::String, projection_norm::Symbol, rounding_thre
 end
 
 if length(ARGS) < 1
-    error("Usage: julia --project run_test.jl <filename.mps> [euclidean|manhattan|abssmooth] [threshold] [vanilla|away|blended_pairwise|blended] [agnostic|backtracking|secant|adaptive] [true|false]")
+    error("Usage: julia --project run_test.jl <filename.mps> [euclidean|manhattan|abssmooth] [vanilla|away|blended_pairwise|blended] [agnostic|backtracking|secant|adaptive] [rand_round=true|false] [warm_start=true|false]")
 end
 
 filename = ARGS[1]
@@ -78,20 +101,14 @@ if projection_norm ∉ valid_norms
     error("Invalid projection norm: $projection_norm. Must be one of: $valid_norms")
 end
 
-rounding_threshold = length(ARGS) >= 3 ? parse(Float64, ARGS[3]) : DEF_ROUNDING_THRESHOLD
-
-if rounding_threshold < 0.0 || rounding_threshold > 1.0
-    error("Rounding threshold must be between 0.0 and 1.0, got: $rounding_threshold")
-end
-
-fw_variant = length(ARGS) >= 4 ? Symbol(ARGS[4]) : DEF_FW_VARIANT
+fw_variant = length(ARGS) >= 3 ? Symbol(ARGS[3]) : DEF_FW_VARIANT
 
 valid_variants = (:vanilla, :away, :blended_pairwise, :blended)
 if fw_variant ∉ valid_variants
     error("Invalid FW variant: $fw_variant. Must be one of: $valid_variants")
 end
 
-line_search = length(ARGS) >= 5 ? Symbol(ARGS[5]) : DEF_LINE_SEARCH
+line_search = length(ARGS) >= 4 ? Symbol(ARGS[4]) : DEF_LINE_SEARCH
 
 valid_line_searches = (:agnostic, :backtracking, :secant, :adaptive)
 if line_search ∉ valid_line_searches
@@ -102,7 +119,13 @@ if projection_norm == :manhattan && line_search ∈ (:adaptive, :secant)
     error("manhattan norm requires a smooth objective — use agnostic or backtracking line search instead")
 end
 
-presolve = length(ARGS) >= 6 ? parse(Bool, ARGS[6]) : DEF_PRESOLVE
+rand_round = length(ARGS) >= 5 ? parse(Bool, ARGS[5]) : DEF_RAND_ROUND
+warm_start  = length(ARGS) >= 6 ? parse(Bool, ARGS[6]) : DEF_WARM_START
 
+if warm_start && fw_variant == :vanilla
+    @warn "warm_start is enabled but fw_variant=:vanilla does not support warm starting — warm start will be ignored"
+end
+
+config = FPFWConfig(projection_norm, fw_variant, line_search, rand_round, warm_start)
 start_time = time()
-mps_test_model(filename, projection_norm, rounding_threshold, fw_variant, line_search, presolve, start_time)
+mps_test_model(filename, config, start_time)
