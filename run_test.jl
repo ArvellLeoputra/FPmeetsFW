@@ -85,7 +85,7 @@ function mps_test_model(filename::String, config::FPFWConfig, global_start_time:
 end
 
 if length(ARGS) < 1
-    error("Usage: julia --project run_test.jl <filename.mps> [euclidean|manhattan|abssmooth] [vanilla|away|blended_pairwise|blended] [agnostic|backtracking|secant|adaptive] [rand_round=true|false] [warm_start=true|false]")
+    error("Usage: julia --project run_test.jl <filename.mps> [euclidean|manhattan|smooth_manhattan] [vanilla|away|blended_pairwise|blended] [agnostic|backtracking|secant|adaptive] [rand_round=true|false] [warm_start=true|false]")
 end
 
 filename = ARGS[1]
@@ -96,7 +96,7 @@ end
 
 projection_norm = length(ARGS) >= 2 ? Symbol(ARGS[2]) : :euclidean
 
-valid_norms = (:euclidean, :manhattan, :abssmooth)
+valid_norms = (:euclidean, :manhattan, :smooth_manhattan)
 if projection_norm ∉ valid_norms
     error("Invalid projection norm: $projection_norm. Must be one of: $valid_norms")
 end

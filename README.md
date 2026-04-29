@@ -27,7 +27,7 @@ until x is integral or time limit / max iterations
 - **Three projection norms**:
   - `euclidean`: Minimizes L2 distance (smooth, standard FP)
   - `manhattan`: Minimizes L1 distance (non-smooth)
-  - `abssmooth`: Minimizes L1 distance with a smooth approximation
+  - `smooth_manhattan`: Minimizes L1 distance with a smooth approximation
 
 - **Four FW variants**: `vanilla`, `away`, `blended_pairwise`, `blended`
 
@@ -41,7 +41,7 @@ until x is integral or time limit / max iterations
 ## Usage
 
 ```bash
-julia --project run_test.jl <instance.mps> [euclidean|manhattan|abssmooth] [vanilla|away|blended_pairwise|blended] [agnostic|backtracking|secant|adaptive] [rand_round=true|false] [warm_start=true|false]
+julia --project run_test.jl <instance.mps> [euclidean|manhattan|smooth_manhattan] [vanilla|away|blended_pairwise|blended] [agnostic|backtracking|secant|adaptive] [rand_round=true|false] [warm_start=true|false]
 ```
 
 All arguments after `instance.mps` are optional and fall back to the defaults in `dependencies.jl`.

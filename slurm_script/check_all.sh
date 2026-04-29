@@ -8,7 +8,7 @@ BASE_DIR="/home/htc/aleoputra/project/FPmeetsFW"
 DEF_GLOBAL_TIME_LIMIT=$(grep 'const DEF_GLOBAL_TIME_LIMIT' "$BASE_DIR/dependencies.jl" | grep -oE '[0-9]+(\.[0-9]+)?')
 DEF_SCIP_TIME_LIMIT=$(grep 'const DEF_SCIP_TIME_LIMIT' "$BASE_DIR/dependencies.jl" | grep -oE '[0-9]+(\.[0-9]+)?')
 
-NORMS=("manhattan" "euclidean" "abssmooth" "euclidean" "euclidean" "abssmooth" "abssmooth")
+NORMS=("manhattan" "euclidean" "smooth_manhattan" "euclidean" "euclidean" "smooth_manhattan" "smooth_manhattan")
 LINESEARCHES=("agnostic" "agnostic" "agnostic" "adaptive" "secant" "adaptive" "secant")
 VARIANTS=("vanilla" "away" "blended_pairwise" "blended")
 N_COMBINATIONS_TOTAL=$(( ${#NORMS[@]} * ${#VARIANTS[@]} ))

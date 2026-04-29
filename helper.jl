@@ -46,6 +46,39 @@ function print_heuristic_summary(
     println("="^80 * "\n")
 end
 
+function is_equal_values(
+    x1::Float64,
+    x2::Float64,
+    tolerance::Float64=DEF_TOLERANCE
+)::Bool
+
+    return abs(x1 - x2) <= tolerance
+end
+
+function is_lower_than(
+    x1::Float64,
+    x2::Float64,
+    tolerance::Float64=DEF_TOLERANCE
+)::Bool
+
+    return x1 < x2 - tolerance
+end
+
+function are_equal_vectors(
+    integer_indices::Vector{Int},
+    x1::Vector{Float64},
+    x2::Vector{Float64},
+    tolerance::Float64=DEF_TOLERANCE
+)::Bool
+
+    for i in integer_indices
+        if abs(x1[i] - x2[i]) > tolerance
+            return false
+        end
+    end
+    return true
+end
+
 # Helper function to check constraint feasibility
 function check_feasibility(
     scip::Ptr{SCIP.SCIP_},

@@ -149,7 +149,7 @@ function SCIP.find_primal_solution(
             return storage
         end
 
-    elseif heur.projection_norm == :abssmooth
+    elseif heur.projection_norm == :smooth_manhattan
         f_proj = (x, x_round) -> begin
             s = 0.0
             for i in all_integers
@@ -173,8 +173,8 @@ function SCIP.find_primal_solution(
     end
 
     # Hash function for cycle detection (only hashes integer variable values)
-    function hash_rounded(x_round, integer_indices)
-        hash(tuple((x_round[i] for i in integer_indices)...))
+    function hash_solution(x, integer_indices)
+        hash(tuple((x[i] for i in integer_indices)...))
     end
     
     # Rounding function using custom threshold
@@ -194,8 +194,13 @@ function SCIP.find_primal_solution(
     # Active set for warm-starting away/blended variants
     active_set = nothing             # Preallocate active set for warm-starting
 
-    # Cycle detection: store hashes of all visited rounded solutions
-    rounded_cache = Set{UInt64}()
+    # Stagnation detection
+    best_int_gap = Inf
+    stagnation_count = 0
+
+    # FW escape flag and buffer
+    fw_escaped = false
+    x_round_escape = zeros(Float64, nvars)
 
     # TODO: store the best solution found across iterations, not just the first one
     found_solution = nothing
@@ -219,6 +224,12 @@ function SCIP.find_primal_solution(
             if state.d !== nothing && state.gamma !== nothing
                 x_after .= state.x .- state.gamma .* state.d
                 push!(fw_traj, (state.t, copy(x_after), state.primal))
+
+                round_solution!(x_round_escape, x_after, all_integers, heur.rounding_threshold)
+                if !are_equal_vectors(all_integers, x_round_escape, x_round)
+                    fw_escaped = true
+                    return false
+                end
             end
         end
         return true
@@ -283,6 +294,26 @@ function SCIP.find_primal_solution(
         # Step 1: Rounding LP feasible solution with custom threshold
         round_solution!(x_round, x, all_integers, heur.rounding_threshold)
 
+        # Check if rounded solution is feasible
+        if check_feasibility(scip, x_round, col_to_idx)
+            if submit_solution_to_scip(scip, heur_ptr, lp_cols, x_round, nvars)
+                stats.solution_found = true
+                stats.exit_reason = :solution_found
+                stats.iter_found_solution = iter
+                stats.final_objective = sum(x_round[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lp_cols[j])) for j in 1:nvars)
+                result = SCIP.SCIP_FOUNDSOL
+
+                if DEBUG_VERBOSE
+                    println()
+                    println("End solution:")
+                    for j in 1:nvars
+                        @printf("  x[%d] = %.3f\n", j, x_round[j])
+                    end
+                end
+                break
+            end
+        end
+
         if DEBUG_VERBOSE
             println("Rounding(threshold=$(heur.rounding_threshold)):")
             for i in all_integers
@@ -291,9 +322,65 @@ function SCIP.find_primal_solution(
             println("------------------------\n")
         end
 
-        # Cycle detection: check if we've visited this rounded solution before
-        h = hash_rounded(x_round, all_integers)
-        if h in rounded_cache
+        fw_escaped = false
+        empty!(fw_traj)
+
+        # Step 2: Projection using Frank-Wolfe
+        remaining_time = DEF_GLOBAL_TIME_LIMIT - (time() - heur.global_start_time)
+        fw_start = time()
+
+        fw_result = if heur.warm_start && active_set !== nothing && heur.fw_variant !== :vanilla
+            call_fw_variant(
+                heur.fw_variant,
+                x -> f_proj(x, x_round),
+                (storage, x) -> g_proj(storage, x, x_round),
+                heur.lmo,
+                active_set,
+                max_iteration = DEF_FW_MAX_ITER,
+                verbose = false,
+                line_search = ls,
+                epsilon = DEF_FW_TOLERANCE,
+                callback = fw_callback,
+                timeout = remaining_time
+            )
+        else
+            call_fw_variant(
+                heur.fw_variant,
+                x -> f_proj(x, x_round),
+                (storage, x) -> g_proj(storage, x, x_round),
+                heur.lmo,
+                x,
+                max_iteration = DEF_FW_MAX_ITER,
+                verbose = false,
+                line_search = ls,
+                epsilon = DEF_FW_TOLERANCE,
+                callback = fw_callback,
+                timeout = remaining_time
+            )
+        end
+
+        # If FW gives us intermediate solutions via callback that escape the rounding target, we immediately jump to next iteration with the escaped solution
+        if fw_escaped
+            x .= x_after
+            prev_x .= x_after
+            continue
+        else
+            x_new = fw_result.x
+            if heur.warm_start && heur.fw_variant !== :vanilla
+                active_set = fw_result.active_set
+            end
+        end
+
+        # Cycle detection: check if we've visited this solution before
+        int_gap = f_proj(x_new, x_round)
+        if is_lower_than(int_gap, best_int_gap)
+            best_int_gap = int_gap
+            stagnation_count = 0
+        else
+            stagnation_count += 1
+        end
+
+        if stagnation_count >= DEF_MAX_STAGNATION
             stats.restarts += 1
 
             if stats.restarts >= DEF_MAX_RESTARTS
@@ -344,53 +431,54 @@ function SCIP.find_primal_solution(
                 println()
             end
 
-            prev_x .= x  # sync prev_x for distance calculation
+            stagnation_count = 0
+            best_int_gap = Inf
 
-            # Recompute hash after perturbation so we cache the new rounding
-            h = hash_rounded(x_round, all_integers)
-        end
+            # Re-run FW with perturbed x_round so perturbation takes effect immediately
+            remaining_time = DEF_GLOBAL_TIME_LIMIT - (time() - heur.global_start_time)
+            fw_escaped = false
+            empty!(fw_traj)
 
-        push!(rounded_cache, h)
+            fw_result_perturbed = if heur.warm_start && active_set !== nothing && heur.fw_variant !== :vanilla
+                call_fw_variant(
+                    heur.fw_variant,
+                    x -> f_proj(x, x_round),
+                    (storage, x) -> g_proj(storage, x, x_round),
+                    heur.lmo,
+                    active_set,
+                    max_iteration = DEF_FW_MAX_ITER,
+                    verbose = false,
+                    line_search = ls,
+                    epsilon = DEF_FW_TOLERANCE,
+                    callback = fw_callback,
+                    timeout = remaining_time
+                )
+            else
+                call_fw_variant(
+                    heur.fw_variant,
+                    x -> f_proj(x, x_round),
+                    (storage, x) -> g_proj(storage, x, x_round),
+                    heur.lmo,
+                    x,
+                    max_iteration = DEF_FW_MAX_ITER,
+                    verbose = false,
+                    line_search = ls,
+                    epsilon = DEF_FW_TOLERANCE,
+                    callback = fw_callback,
+                    timeout = remaining_time
+                )
+            end
 
-        empty!(fw_traj)
+            if fw_escaped
+                x .= x_after
+            else
+                x .= fw_result_perturbed.x
+                if heur.warm_start && heur.fw_variant !== :vanilla
+                    active_set = fw_result_perturbed.active_set
+                end
+            end
 
-        # Step 2: Projection using Frank-Wolfe
-        remaining_time = DEF_GLOBAL_TIME_LIMIT - (time() - heur.global_start_time)
-        fw_start = time()
-
-        fw_result = if heur.warm_start && active_set !== nothing && heur.fw_variant !== :vanilla
-            call_fw_variant(
-                heur.fw_variant,
-                x -> f_proj(x, x_round),
-                (storage, x) -> g_proj(storage, x, x_round),
-                heur.lmo,
-                active_set,
-                max_iteration = DEF_FW_MAX_ITER,
-                verbose = false,
-                line_search = ls,
-                epsilon = DEF_FW_TOLERANCE,
-                callback = fw_callback,
-                timeout = remaining_time
-            )
-        else
-            call_fw_variant(
-                heur.fw_variant,
-                x -> f_proj(x, x_round),
-                (storage, x) -> g_proj(storage, x, x_round),
-                heur.lmo,
-                x,
-                max_iteration = DEF_FW_MAX_ITER,
-                verbose = false,
-                line_search = ls,
-                epsilon = DEF_FW_TOLERANCE,
-                callback = fw_callback,
-                timeout = remaining_time
-            )
-        end
-
-        x_new = fw_result.x
-        if heur.warm_start && heur.fw_variant !== :vanilla
-            active_set = fw_result.active_set
+            prev_x .= x
         end
 
         stats.fw_time += time() - fw_start
@@ -458,7 +546,7 @@ function SCIP.find_primal_solution(
             end
         else
             # Continue with the projected solution for next FW iteration
-            prev_x .= x
+            prev_x .= x_new
             x .= x_new
         end
     end

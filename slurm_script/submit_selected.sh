@@ -1,9 +1,6 @@
 #!/bin/bash
 
 # Submit selected FP-FW combinations
-# manhattan: agnostic x {away, blended_pairwise}
-# euclidean: adaptive x {away, blended_pairwise, blended}
-# abssmooth: adaptive x {away, blended_pairwise, blended}
 # Total: 8 combinations
 
 PROJECT_DIR="/home/htc/aleoputra/project/FPmeetsFW"
@@ -17,9 +14,9 @@ fi
 echo "Found $NUM_INSTANCES instances in $INSTANCE_DIR"
 
 # Explicit list of (NORM, VARIANT, LS) combinations
-NORMS=("manhattan" "manhattan" "euclidean" "euclidean" "euclidean" "abssmooth" "abssmooth" "abssmooth")
-VARIANTS=("away" "blended_pairwise" "away" "blended_pairwise" "blended" "away" "blended_pairwise" "blended")
-LINESEARCHES=("agnostic" "agnostic" "adaptive" "adaptive" "adaptive" "adaptive" "adaptive" "adaptive")
+NORMS=("manhattan" "manhattan" "euclidean" "euclidean" "euclidean" "smooth_manhattan" "smooth_manhattan" "smooth_manhattan")
+VARIANTS=("away" "blended_pairwise" "away" "away" "blended" "away" "away" "blended")
+LINESEARCHES=("agnostic" "agnostic" "secant" "adaptive" "adaptive" "secant" "adaptive" "adaptive")
 
 for i in "${!NORMS[@]}"; do
     NORM="${NORMS[$i]}"

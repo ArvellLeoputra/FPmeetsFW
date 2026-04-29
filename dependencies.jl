@@ -59,6 +59,7 @@ const DEF_SCIP_TIME_LIMIT = 300.0
 # Perturbation parameters
 const DEF_PERTURB_FRACTION = 0.2   # Fraction of binary vars to flip when cycle detected
 const DEF_MAX_RESTARTS = 1000      # Maximum number of restarts before giving up
+const DEF_MAX_STAGNATION = 5       # Maximum number of iterations without improvement before perturbing
 const DEF_BIGM = 1e9               # Big M constant for cycle-breaking perturbations
 const DEF_BIGBIGM = 1e15           # Bigbig M constant for perturbations
 

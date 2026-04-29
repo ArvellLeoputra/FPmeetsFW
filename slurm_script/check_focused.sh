@@ -10,7 +10,7 @@ DEF_SCIP_TIME_LIMIT=$(grep 'const DEF_SCIP_TIME_LIMIT' "$BASE_DIR/dependencies.j
 
 NORM="euclidean"
 VARIANT="away"
-LS="adaptive"
+LS="secant"
 
 RR_VALUES=("false" "true"  "false" "true")
 WS_VALUES=("false" "false" "true"  "true")

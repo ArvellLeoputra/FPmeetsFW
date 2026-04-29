@@ -15,7 +15,7 @@ echo "Found $NUM_INSTANCES instances in $INSTANCE_DIR"
 
 NORM="euclidean"
 VARIANT="away"
-LS="adaptive"
+LS="secant"
 
 # (rand_round, warm_start) combinations
 RR_VALUES=("false" "true"  "false" "true")
