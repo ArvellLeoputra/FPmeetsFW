@@ -36,10 +36,10 @@ function print_heuristic_summary(
     println("Gap:               $gap_str")
     println("Total time:        $(round(total_time, digits=2))s")
     println("Total heur time:   $heur_time_str")
-    println("FP iterations:     $(stats.fp_iterations)")
-    println("FW iterations:     $(stats.fw_iterations)")
     println("FW time:           $(round(stats.fw_time, digits=2))s")
     println("RR time:           $(round(stats.rr_time, digits=2))s")
+    println("FP iterations:     $(stats.fp_iterations)")
+    println("FW iterations:     $(stats.fw_iterations)")
     println("Restarts:          $(stats.restarts)")
     println("Solution found:    $(stats.solution_found)")
     println("Exit reason:       $exit_msg")
@@ -77,6 +77,53 @@ function are_equal_vectors(
         end
     end
     return true
+end
+
+function extract_lp_data(
+    scip::Ptr{SCIP.SCIP_},
+    nvars::Int32,
+)
+    ptr_cols = SCIP.SCIPgetLPCols(scip)
+    lp_cols = unsafe_wrap(Vector{Ptr{SCIP.SCIP_COL}}, ptr_cols, nvars)
+    col_to_idx = Dict(lp_cols[k] => k for k in 1:nvars)
+
+    binary = Int[]
+    integer = Int[]
+    current_solution = zeros(SCIP.SCIP_Real, nvars)
+
+    for j in 1:nvars
+        var = SCIP.SCIPcolGetVar(lp_cols[j])
+        if SCIP.SCIPvarIsBinary(var) == SCIP.TRUE
+            push!(binary, j)
+        elseif SCIP.SCIPvarIsIntegral(var) == SCIP.TRUE
+            push!(integer, j)
+        end
+        current_solution[j] = SCIP.SCIPcolGetPrimsol(lp_cols[j])
+    end
+
+    return lp_cols, col_to_idx, binary, integer, current_solution
+end
+
+# Rounding function using custom threshold
+function round_solution!(
+    x_round::Vector{Float64},
+    x::Vector{Float64},
+    integer_indices::Vector{Int},
+    threshold::Float64
+)::Nothing
+
+    for i in integer_indices
+        x_round[i] = x[i] - floor(x[i]) >= threshold ? ceil(x[i]) : floor(x[i])
+    end
+end
+
+# Hash function for cycle detection (only hashes integer variable values)
+function hash_solution(
+    x::Vector{Float64},
+    integer_indices::Vector{Int}
+)::Int
+
+    hash(tuple((x[i] for i in integer_indices)...))
 end
 
 # Helper function to check constraint feasibility
@@ -152,4 +199,35 @@ function check_integrality(
         end
     end
     return true
+end
+
+function submit_solution_to_scip(
+    scip::Ptr{SCIP.SCIP_},
+    heur_ptr::Ptr{SCIP.SCIP_HEUR},
+    lp_cols::Vector{Ptr{SCIP.SCIP_COL}},
+    solution::Vector{Float64},
+    nvars::Int32
+)::Bool
+
+    sol_ptr = Ref{Ptr{SCIP.SCIP_SOL}}()
+    SCIP.SCIPcreateSol(scip, sol_ptr, heur_ptr)
+    sol = sol_ptr[]
+
+    # Set solution values
+    for j in 1:nvars
+        col = lp_cols[j]
+        var = SCIP.SCIPcolGetVar(col)
+        SCIP.SCIPsetSolVal(scip, sol, var, solution[j])
+    end
+
+    # Try to add solution
+    stored = Ref{SCIP.SCIP_Bool}()
+    SCIP.SCIPtrySol(scip, sol, SCIP.TRUE, SCIP.FALSE, SCIP.TRUE, SCIP.TRUE, SCIP.TRUE, stored)
+
+    if stored[] == SCIP.TRUE
+        return true
+    else
+        SCIP.SCIPfreeSol(scip, sol_ptr)
+        return false
+    end
 end

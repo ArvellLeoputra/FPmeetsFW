@@ -3,6 +3,7 @@ include("scip_setup.jl")
 include("helper.jl")
 include("fpfwheur.jl")
 include("lmo_builder.jl")
+include("fw_utils.jl")
 
 function mps_test_model(filename::String, config::FPFWConfig, global_start_time::Float64)
     model = minimal_setup(presolve=DEF_PRESOLVE)
@@ -42,16 +43,9 @@ function mps_test_model(filename::String, config::FPFWConfig, global_start_time:
     println("="^80)
 
     heur = FPFWHeuristic(
-        n_orig_binary,
-        n_orig_integer,
         0,
         nothing,
-        config.projection_norm,
-        DEF_ROUNDING_THRESHOLD,
-        config.fw_variant,
-        config.line_search,
-        config.rand_round,
-        config.warm_start,
+        config,
         global_start_time
     )
 
@@ -128,4 +122,9 @@ end
 
 config = FPFWConfig(projection_norm, fw_variant, line_search, rand_round, warm_start)
 start_time = time()
+
+if DEF_RANDOM_SEED !== nothing
+    Random.seed!(DEF_RANDOM_SEED)
+end
+
 mps_test_model(filename, config, start_time)
