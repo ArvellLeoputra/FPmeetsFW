@@ -41,6 +41,8 @@ grand_failed_binary=0
 grand_failed_ginteger=0
 grand_rr_found=0
 
+declare -A INSTANCE_SOLVED_COUNT=()
+
 # Clean up previous outputs
 for i in "${!RR_VALUES[@]}"; do
     rm -rf "$BASE_DIR/run_focused/${NORM}_${VARIANT}_${LS}_rr${RR_VALUES[$i]}_ws${WS_VALUES[$i]}/result"
@@ -201,6 +203,7 @@ for i in "${!RR_VALUES[@]}"; do
         elif [ "$solution_found" = "true" ]; then
             found_count=$((found_count + 1))
             this_was_found=1
+            INSTANCE_SOLVED_COUNT["$instance_name"]=$(( ${INSTANCE_SOLVED_COUNT["$instance_name"]:-0} + 1 ))
             [ -n "$rr_found_flag" ] && rr_found_count=$((rr_found_count + 1))
             found_times+=("$total_time")
             found_fw_iters+=("$fw_iterations")
@@ -390,6 +393,23 @@ for inst in $(echo "${!INSTANCE_BINVARS[@]}" | tr ' ' '\n' | sort); do
     printf "%-40s %-10s %-10s\n" "$inst" "${INSTANCE_BINVARS[$inst]}" "${INSTANCE_INTVARS[$inst]:-0}"
 done
 echo "----------------------------------------------------"
+echo ""
+echo "PER-INSTANCE SOLVE COUNT (out of $N_COMBINATIONS combinations)"
+echo "----------------------------------------------------"
+printf "%-40s %-10s\n" "Instance" "Solved"
+echo "----------------------------------------------------"
+solved_all=0; solved_some=0; solved_none=0
+for inst in $(echo "${!INSTANCE_BINVARS[@]}" | tr ' ' '\n' | sort); do
+    count=${INSTANCE_SOLVED_COUNT["$inst"]:-0}
+    printf "%-40s %d/$N_COMBINATIONS\n" "$inst" "$count"
+    [ "$count" -eq "$N_COMBINATIONS" ] && solved_all=$((solved_all + 1))
+    [ "$count" -gt 0 ] && [ "$count" -lt "$N_COMBINATIONS" ] && solved_some=$((solved_some + 1))
+    [ "$count" -eq 0 ] && solved_none=$((solved_none + 1))
+done
+echo "----------------------------------------------------"
+echo "Solved by all $N_COMBINATIONS:  $solved_all"
+echo "Solved by some:  $solved_some"
+echo "Solved by none:  $solved_none"
 } | tee "$BENCHMARK_SUMMARY"
 
 echo ""
