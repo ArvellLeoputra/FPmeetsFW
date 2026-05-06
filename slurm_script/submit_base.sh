@@ -4,7 +4,7 @@
 # Sweeps 4 combinations of rand_round and warm_start
 
 PROJECT_DIR="/home/htc/aleoputra/project/FPmeetsFW"
-INSTANCE_DIR="$PROJECT_DIR/selection_benchmark"
+INSTANCE_DIR="$PROJECT_DIR/benchmark_full"
 
 NUM_INSTANCES=$(ls "$INSTANCE_DIR" | grep -cE '\.mps(\.gz)?$')
 if [ "$NUM_INSTANCES" -eq 0 ]; then
@@ -18,8 +18,8 @@ VARIANT="away"
 LS="secant"
 
 # (rand_round, warm_start) combinations
-RR_VALUES=("false" "true"  "false" "true")
-WS_VALUES=("false" "false" "true"  "true")
+RR_VALUES=("true")
+WS_VALUES=("true")
 
 for i in "${!RR_VALUES[@]}"; do
     RR="${RR_VALUES[$i]}"

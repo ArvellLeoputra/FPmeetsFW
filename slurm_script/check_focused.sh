@@ -1,7 +1,6 @@
 #!/bin/bash
 
 # Check results for focused FP-FW ablation: euclidean + away + adaptive
-# Sweeps 4 combinations of rand_round and warm_start
 
 BASE_DIR="/home/htc/aleoputra/project/FPmeetsFW"
 
@@ -12,8 +11,8 @@ NORM="euclidean"
 VARIANT="away"
 LS="secant"
 
-RR_VALUES=("false" "true"  "false" "true")
-WS_VALUES=("false" "false" "true"  "true")
+RR_VALUES=("true")
+WS_VALUES=("true")
 
 N_COMBINATIONS=${#RR_VALUES[@]}
 
@@ -387,21 +386,21 @@ echo "  Unknown:           $grand_other"
 echo ""
 echo "INSTANCE VARIABLE COUNTS"
 echo "----------------------------------------------------"
-printf "%-40s %-10s %-10s\n" "Instance" "Bin Vars" "Int Vars"
+printf "%-30s %-10s %-10s\n" "Instance" "Bin Vars" "Int Vars"
 echo "----------------------------------------------------"
 for inst in $(echo "${!INSTANCE_BINVARS[@]}" | tr ' ' '\n' | sort); do
-    printf "%-40s %-10s %-10s\n" "$inst" "${INSTANCE_BINVARS[$inst]}" "${INSTANCE_INTVARS[$inst]:-0}"
+    printf "%-30s %-10s %-10s\n" "$inst" "${INSTANCE_BINVARS[$inst]}" "${INSTANCE_INTVARS[$inst]:-0}"
 done
 echo "----------------------------------------------------"
 echo ""
 echo "PER-INSTANCE SOLVE COUNT (out of $N_COMBINATIONS combinations)"
 echo "----------------------------------------------------"
-printf "%-40s %-10s\n" "Instance" "Solved"
+printf "%-30s %-10s\n" "Instance" "Solved"
 echo "----------------------------------------------------"
 solved_all=0; solved_some=0; solved_none=0
 for inst in $(echo "${!INSTANCE_BINVARS[@]}" | tr ' ' '\n' | sort); do
     count=${INSTANCE_SOLVED_COUNT["$inst"]:-0}
-    printf "%-40s %d/$N_COMBINATIONS\n" "$inst" "$count"
+    printf "%-30s %d/$N_COMBINATIONS\n" "$inst" "$count"
     [ "$count" -eq "$N_COMBINATIONS" ] && solved_all=$((solved_all + 1))
     [ "$count" -gt 0 ] && [ "$count" -lt "$N_COMBINATIONS" ] && solved_some=$((solved_some + 1))
     [ "$count" -eq 0 ] && solved_none=$((solved_none + 1))
