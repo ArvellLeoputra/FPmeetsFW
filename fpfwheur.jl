@@ -42,10 +42,8 @@ function SCIP.find_primal_solution(
         end
     end
 
-    lp_objective = sum(current_solution[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lp_cols[j]))
-                             for j in 1:nvars)
-
     if DEBUG_VERBOSE
+        lp_objective = sum(current_solution[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lp_cols[j])) for j in 1:nvars)
         println("Initial LP objective: $(round(lp_objective, digits=4))")
 
         nfrac_binary = count(i -> abs(current_solution[i] - round(current_solution[i])) > DEF_TOLERANCE, binary)
@@ -53,7 +51,6 @@ function SCIP.find_primal_solution(
 
         nfrac_integer = count(i -> abs(current_solution[i] - round(current_solution[i])) > DEF_TOLERANCE, integer)
         println("Non-integral integer vars: $nfrac_integer/$(length(integer))")
-
     end
 
     # Main Feasibility Pump with Frank-Wolfe Loop
@@ -70,6 +67,9 @@ function SCIP.find_primal_solution(
     best_int_gap = Inf
     stagnation_count = 0
 
+    # Randomized rounding parameters
+    attempts = max(1, length(all_integers))
+    
     # FW escape flag and buffer
     fw_escaped = false
     x_round_escape = zeros(Float64, nvars)
@@ -107,13 +107,11 @@ function SCIP.find_primal_solution(
         return true  # continue FW iter
     end
 
-    attempts = max(1, length(all_integers))
-
-    iter = 0
+    # Main FPFW loop
     while true
-        iter += 1
+        stats.fp_iterations += 1
         if DEBUG_VERBOSE
-            println("\n--- FPFW Iteration $iter ---")
+            println("\n--- FPFW Iteration $(stats.fp_iterations) ---")
         end
 
         # Check time limit
@@ -122,7 +120,7 @@ function SCIP.find_primal_solution(
             break
         end
 
-        if heur.config.rand_round && iter > 1  # skip randomized rounding in the first iteration to save time
+        if heur.config.rand_round && stats.fp_iterations > 1  # skip randomized rounding in the first iteration to save time
             rr_iter_start = time()
             for _ in 1:attempts
                 if time() - rr_iter_start > DEF_RR_TIME_LIMIT
@@ -138,7 +136,6 @@ function SCIP.find_primal_solution(
                     if submit_solution_to_scip(scip, heur_ptr, lp_cols, x_temp, nvars)
                         stats.solution_found = true
                         stats.exit_reason = :rr_solution_found
-                        stats.iter_found_solution = iter
                         result = SCIP.SCIP_FOUNDSOL
 
                         if DEBUG_VERBOSE
@@ -160,8 +157,6 @@ function SCIP.find_primal_solution(
             end
         end
 
-        stats.fp_iterations = iter
-
         # Step 1: Rounding LP feasible solution with custom threshold
         round_solution!(x_round, x, all_integers, DEF_ROUNDING_THRESHOLD)
 
@@ -170,7 +165,6 @@ function SCIP.find_primal_solution(
             if submit_solution_to_scip(scip, heur_ptr, lp_cols, x_round, nvars)
                 stats.solution_found = true
                 stats.exit_reason = :solution_found
-                stats.iter_found_solution = iter
                 result = SCIP.SCIP_FOUNDSOL
 
                 if DEBUG_VERBOSE
@@ -192,10 +186,11 @@ function SCIP.find_primal_solution(
             println("------------------------\n")
         end
 
+        # Reset FW escape flag and trajectory
         fw_escaped = false
         empty!(fw_traj)
 
-        # Step 2: Projection using Frank-Wolfe
+        # Step 2: "Projection" using Frank-Wolfe
         remaining_time = DEF_GLOBAL_TIME_LIMIT - (time() - heur.global_start_time)
         fw_start = time()
 
@@ -216,7 +211,7 @@ function SCIP.find_primal_solution(
         if fw_escaped
             x .= x_after
             prev_x .= x_after
-            continue
+            continue  # skip rest of checks and go to next FPFW iteration
         else
             x_new = fw_result.x
             if heur.config.warm_start && heur.config.fw_variant !== :vanilla
@@ -226,9 +221,10 @@ function SCIP.find_primal_solution(
 
         # Cycle detection: check if we've visited this solution before
         int_gap = f(x_new, x_round)
+
         if is_lower_than(int_gap, best_int_gap)
             best_int_gap = int_gap
-            stagnation_count = 0
+            stagnation_count = 0  # reset stagnation count if we made progress
         else
             stagnation_count += 1
         end
@@ -242,47 +238,11 @@ function SCIP.find_primal_solution(
             end
 
             if DEBUG_VERBOSE
-                println("Cycle detected at iteration $iter (restart #$(stats.restarts))")
+                println("Cycle detected at iteration $(stats.fp_iterations) (restart #$(stats.restarts))")
                 println("Perturbing:")
             end
 
-            for i in binary
-                if rand() < DEF_PERTURB_FRACTION
-                    x_round[i] = 1.0 - x_round[i]
-                end
-            end
-
-            for i in integer
-                if rand() < DEF_PERTURB_FRACTION
-                    var = SCIP.SCIPcolGetVar(lp_cols[i])
-                    lb = SCIP.SCIPvarGetLbLocal(var)
-                    ub = SCIP.SCIPvarGetUbLocal(var)
-                    r = rand()
-
-                    newval = if (ub - lb) < DEF_BIGBIGM
-                        floor(lb + (1 + ub - lb) * r)
-                    elseif (x_round[i] - lb) < DEF_BIGM
-                        lb + (2 * DEF_BIGM - 1) * r
-                    elseif (ub - x_round[i]) < DEF_BIGM
-                        ub - (2 * DEF_BIGM - 1) * r
-                    else
-                        x[i] + (2 * DEF_BIGM - 1) * r - DEF_BIGM
-                    end
-
-                    x_round[i] = clamp(floor(newval), lb, ub)
-                end
-            end
-
-            if DEBUG_VERBOSE
-                for i in binary
-                    @printf("  bin x[%d]: %.1f\n", i, x_round[i])
-                end
-
-                for i in integer
-                    @printf("  int x[%d]: %.1f\n", i, x_round[i])
-                end
-                println()
-            end
+            perturb_solution!(x, x_round, binary, integer, lp_cols)
 
             stagnation_count = 0
             best_int_gap = Inf
@@ -290,7 +250,6 @@ function SCIP.find_primal_solution(
             # Re-run FW with perturbed x_round so perturbation takes effect immediately
             remaining_time = DEF_GLOBAL_TIME_LIMIT - (time() - heur.global_start_time)
             fw_escaped = false
-            empty!(fw_traj)
 
             fw_result_perturbed = run_fw(
                 heur.config.fw_variant,
@@ -307,25 +266,19 @@ function SCIP.find_primal_solution(
 
             if fw_escaped
                 x .= x_after
+                prev_x .= x_after
+                continue
             else
-                x .= fw_result_perturbed.x
+                x_new .= fw_result_perturbed.x
                 if heur.config.warm_start && heur.config.fw_variant !== :vanilla
                     active_set = fw_result_perturbed.active_set
                 end
             end
-
-            prev_x .= x
         end
 
         stats.fw_time += time() - fw_start
         fw_iters = length(fw_traj)
         stats.fw_iterations += fw_iters
-
-        # Check time limit after FW returns
-        if time() - heur.global_start_time > DEF_GLOBAL_TIME_LIMIT
-            stats.exit_reason = :time_limit
-            break
-        end
 
         if DEBUG_VERBOSE
             for (t, xk, fk) in fw_traj
@@ -341,16 +294,16 @@ function SCIP.find_primal_solution(
         # Step 3: Check feasibility, integrality, distance moved, and objective value
         is_integral = check_integrality(x_new, all_integers)
         is_feasible = check_feasibility(scip, x_new, col_to_idx)
-        obj_val = sum(x_new[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lp_cols[j])) for j in 1:nvars)
 
         if DEBUG_VERBOSE
-            nfrac_binary = count(i -> abs(x_new[i] - round(x_new[i])) > DEF_TOLERANCE, binary)
-            nfrac_integer = count(i -> abs(x_new[i] - round(x_new[i])) > DEF_TOLERANCE, integer)
+            obj_val = sum(x_new[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lp_cols[j])) for j in 1:nvars)
             dist_moved = f(x_new, prev_x)
             int_gap = f(x_new, x_round)
+            nfrac_binary = count(i -> abs(x_new[i] - round(x_new[i])) > DEF_TOLERANCE, binary)
+            nfrac_integer = count(i -> abs(x_new[i] - round(x_new[i])) > DEF_TOLERANCE, integer)
 
             @printf("[Iter %d] obj=%.3f | distance_moved=%.3f | integrality_gap=%.3f | frac_bin=%d/%d | frac_int=%d/%d | fw_iters=%d | integral=%s |feasible=%s\n",
-                iter, obj_val, dist_moved, int_gap, nfrac_binary, length(binary), nfrac_integer, length(integer), fw_iters, is_integral, is_feasible)
+                stats.fp_iterations, obj_val, dist_moved, int_gap, nfrac_binary, length(binary), nfrac_integer, length(integer), fw_iters, is_integral, is_feasible)
         end
 
         # Safety check: FW must always return a feasible point (LP polytope is preserved)
@@ -364,7 +317,6 @@ function SCIP.find_primal_solution(
             if submit_solution_to_scip(scip, heur_ptr, lp_cols, x_new, nvars)
                 stats.solution_found = true
                 stats.exit_reason = :solution_found
-                stats.iter_found_solution = iter
                 result = SCIP.SCIP_FOUNDSOL
 
                 if DEBUG_VERBOSE

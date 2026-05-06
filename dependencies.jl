@@ -31,9 +31,8 @@ mutable struct FPFWStats
     restarts::Int
     solution_found::Bool
     exit_reason::Symbol  # :none, :time_limit, :restart_limit, :infeasible_fw, :solution_found, :rr_solution_found, :solution_rejected, :scip_time_limit, :scip_solved
-    iter_found_solution::Union{Nothing, Int}
 
-    FPFWStats() = new(0.0, 0.0, 0.0, 0, 0, 0, false, :none, nothing)
+    FPFWStats() = new(0.0, 0.0, 0.0, 0, 0, 0, false, :none)
 end
 
 # Default tolerance for feasibility/integrality checks and FW convergence
@@ -57,10 +56,10 @@ const DEF_BIGBIGM = 1e15           # Bigbig M constant for perturbations
 # Random seed for reproducibility; set to nothing to disable
 const DEF_RANDOM_SEED::Union{Nothing, Int} = 42
 
-# Rounding threshold for deciding when to round fractional solutions;
+# Rounding threshold for deciding when to round fractional solutions
 const DEF_ROUNDING_THRESHOLD = 0.5
 
-# Randomized rounding: n_attempts = n_integers
+# Randomized rounding parameters
 const DEF_RAND_ROUND = true
 const DEF_RR_TIME_LIMIT = 3.0
 

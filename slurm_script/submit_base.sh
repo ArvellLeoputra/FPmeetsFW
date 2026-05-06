@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Submit base FP-FW variant: euclidean + away + adaptive
+# Submit base FP-FW variant: euclidean + away + secant
 # Sweeps 4 combinations of rand_round and warm_start
 
 PROJECT_DIR="/home/htc/aleoputra/project/FPmeetsFW"

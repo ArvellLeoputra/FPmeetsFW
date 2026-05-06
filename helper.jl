@@ -12,9 +12,9 @@ function print_heuristic_summary(
     elseif stats.exit_reason == :infeasible_fw
         "FW returned a point outside the feasible polytope (numerical error)"
     elseif stats.exit_reason == :solution_found
-        "integer feasible solution accepted by SCIP at iteration $(stats.iter_found_solution)"
+        "integer feasible solution accepted by SCIP at iteration $(stats.fp_iterations)"
     elseif stats.exit_reason == :rr_solution_found
-        "integer feasible solution found by randomized rounding at iteration $(stats.iter_found_solution)"
+        "integer feasible solution found by randomized rounding at iteration $(stats.fp_iterations)"
     elseif stats.exit_reason == :solution_rejected
         "integer feasible solution found but rejected by SCIP"
     elseif stats.exit_reason == :scip_time_limit
@@ -124,6 +124,42 @@ function hash_solution(
 )::Int
 
     hash(tuple((x[i] for i in integer_indices)...))
+end
+
+function perturb_solution!(
+    x::Vector{Float64},
+    x_round::Vector{Float64},
+    binary::Vector{Int},
+    integer::Vector{Int},
+    lp_cols::Vector{Ptr{SCIP.SCIP_COL}},
+)::Nothing
+
+    for i in binary
+        if rand() < DEF_PERTURB_FRACTION
+            x_round[i] = 1.0 - x_round[i]
+        end
+    end
+
+    for i in integer
+        if rand() < DEF_PERTURB_FRACTION
+            var = SCIP.SCIPcolGetVar(lp_cols[i])
+            lb = SCIP.SCIPvarGetLbLocal(var)
+            ub = SCIP.SCIPvarGetUbLocal(var)
+            r = rand()
+
+            newval = if (ub - lb) < DEF_BIGBIGM
+                floor(lb + (1 + ub - lb) * r)
+            elseif (x_round[i] - lb) < DEF_BIGM
+                lb + (2 * DEF_BIGM - 1) * r
+            elseif (ub - x_round[i]) < DEF_BIGM
+                ub - (2 * DEF_BIGM - 1) * r
+            else
+                x[i] + (2 * DEF_BIGM - 1) * r - DEF_BIGM
+            end
+
+            x_round[i] = clamp(floor(newval), lb, ub)
+        end
+    end
 end
 
 # Helper function to check constraint feasibility
