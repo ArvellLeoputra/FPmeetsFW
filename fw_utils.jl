@@ -41,6 +41,7 @@ function build_fw_functions(norm::Symbol, all_integers::Vector{Int})
             return storage
         end
 
+    # check
     elseif norm == :smooth_manhattan
         f = (x, x_round) -> sum(sqrt((x[i] - x_round[i])^2 + DEF_TOLERANCE) for i in all_integers)
 
@@ -72,7 +73,9 @@ function build_fw_functions(norm::Symbol, all_integers::Vector{Int})
 end
 
 function build_line_search(line_search::Symbol)
-    if line_search == :agnostic
+    if line_search == :unitary
+        FrankWolfe.FixedStep(1.0)
+    elseif line_search == :agnostic
         FrankWolfe.Agnostic()
     elseif line_search == :backtracking
         FrankWolfe.Backtracking()

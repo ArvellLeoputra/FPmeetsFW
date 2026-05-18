@@ -8,10 +8,10 @@ import MathOptInterface
 const MOI = MathOptInterface
 
 struct FPFWConfig
-    projection_norm::Symbol                                                                                                                                                                                                  
-    fw_variant::Symbol                                                                                                                                                                                                            
-    line_search::Symbol                                                                                                                                                                                                         
-    rand_round::Bool                                                                                                                                                                                                            
+    projection_norm::Symbol
+    fw_variant::Symbol
+    line_search::Symbol
+    rand_round::Bool
     warm_start::Bool
 end
 
@@ -40,7 +40,7 @@ const DEF_TOLERANCE = 1e-6
 const DEF_FW_TOLERANCE = 1e-7
 
 # Iteration parameters
-const DEF_FW_MAX_ITER = 1000
+const DEF_FW_MAX_ITER = 300
 
 # Time limit
 const DEF_GLOBAL_TIME_LIMIT = 480.0
@@ -73,7 +73,7 @@ const DEF_FW_VARIANT = :away
 const DEF_LINE_SEARCH = :secant
 
 # Determine whether presolve on or off
-const DEF_PRESOLVE = true
+const DEF_PRESOLVE = false
 
 # Debug mode: set to true to print detailed step-by-step output
 const DEBUG_VERBOSE = false

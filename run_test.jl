@@ -17,7 +17,7 @@ function mps_test_model(filename::String, config::FPFWConfig, global_start_time:
     orig_vars = unsafe_wrap(Vector{Ptr{SCIP.SCIP_VAR}}, SCIP.SCIPgetOrigVars(scip), nvars_orig)
     n_orig_binary = sum(SCIP.SCIPvarGetType(orig_vars[j]) == SCIP.SCIP_VARTYPE_BINARY for j in 1:nvars_orig)
     n_orig_integer = sum(SCIP.SCIPvarGetType(orig_vars[j]) == SCIP.SCIP_VARTYPE_INTEGER for j in 1:nvars_orig)
-    n_orig_continuous = nvars_orig - n_orig_binary - n_orig_integer                                                                                                                                                                   
+    n_orig_continuous = nvars_orig - n_orig_binary - n_orig_integer
 
     println("="^80)
     println("RUN INFO")
@@ -104,7 +104,7 @@ end
 
 line_search = length(ARGS) >= 4 ? Symbol(ARGS[4]) : DEF_LINE_SEARCH
 
-valid_line_searches = (:agnostic, :backtracking, :secant, :adaptive)
+valid_line_searches = (:agnostic, :backtracking, :secant, :adaptive, :unitary)
 if line_search ∉ valid_line_searches
     error("Invalid line search: $line_search. Must be one of: $valid_line_searches")
 end
