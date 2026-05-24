@@ -8,23 +8,25 @@ function SCIP.find_primal_solution(
 )::Tuple{SCIP.SCIP_RETCODE, SCIP.SCIP_RESULT}
 
     @assert SCIP.SCIPhasCurrentNodeLP(scip) == SCIP.TRUE  # always true, since we set timing to DURINGLPLOOP
-    
+
     heur.called += 1
     if heur.called > 1
         return (SCIP.SCIP_OKAY, SCIP.SCIP_DIDNOTRUN)
     end
-    
+
     result = SCIP.SCIP_DIDNOTFIND
+    stats = FPFWStats()
+    startTime = time()
 
     # SCIP is initially given DEF_SCIP_TIME_LIMIT (300s) to solve the LP relaxation.                                                                                                                                  
     # Once the heuristic is called, extend to DEF_GLOBAL_TIME_LIMIT (480s) so SCIP doesn't terminate while the heuristic is running.
     SCIP.SCIPsetRealParam(scip, "limits/time", DEF_GLOBAL_TIME_LIMIT)
 
-    stats = FPFWStats()
-    heur_start_time = time()
-
+    # Extract LP data
     nvars = SCIP.SCIPgetNLPCols(scip)
     nrows = SCIP.SCIPgetNLPRows(scip)
+    lp_cols, col_to_idx, binary, integer, current_solution = extract_lp_data(scip, nvars)
+    intIndices = [binary; integer]
 
     # Build LMO from current LP
     # Currently not useful, since we set the heuristic to only run once
@@ -32,25 +34,21 @@ function SCIP.find_primal_solution(
         heur.lmo = build_lmo_from_scip_lp(scip, nvars, nrows)
     end
 
-    lp_cols, col_to_idx, binary, integer, current_solution = extract_lp_data(scip, nvars)
-    all_integers = [binary; integer]
+    # Log initial LP solve info
+    stats.dualBound = SCIP.SCIPgetDualbound(scip)
+    lpRootIter = SCIP.SCIPgetNRootLPIterations(scip)
+    nFracVars = count(i -> abs(current_solution[i] - round(current_solution[i])) > DEF_TOLERANCE, intIndices)
+    rootTime = SCIP.SCIPgetSolvingTime(scip)
+
+    printstyled("[initialSolve]\n", color=:cyan)
+    @printf("Initial LP: lpiter=%d obj=%.2f frac=%d/%d time=%.2fs\n", 
+            lpRootIter, stats.dualBound, nFracVars, length(intIndices), rootTime)
 
     if DEBUG_VERBOSE
-        println("Initial solution:")
+        printstyled("[debug info]\n", color=:yellow)
         for j in 1:nvars
             @printf("  x[%d] = %.3f\n", j, current_solution[j])
-        end
-    end
-
-    if DEBUG_VERBOSE
-        lp_objective = sum(current_solution[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lp_cols[j])) for j in 1:nvars)
-        println("Initial LP objective: $(round(lp_objective, digits=4))")
-
-        nfrac_binary = count(i -> abs(current_solution[i] - round(current_solution[i])) > DEF_TOLERANCE, binary)
-        println("Non-integral binary vars: $nfrac_binary/$(length(binary))")
-
-        nfrac_integer = count(i -> abs(current_solution[i] - round(current_solution[i])) > DEF_TOLERANCE, integer)
-        println("Non-integral integer vars: $nfrac_integer/$(length(integer))")
+        end        
     end
 
     # Main Feasibility Pump with Frank-Wolfe Loop
@@ -61,28 +59,28 @@ function SCIP.find_primal_solution(
     x_temp  = zeros(Float64, nvars)  # Preallocated buffer for randomized rounding
 
     # Active set for warm-starting away/blended variants
-    active_set = nothing             # Preallocate active set for warm-starting
+    activeSet = nothing             # Preallocate active set for warm-starting
 
     # Stagnation detection
-    best_int_gap = Inf
-    stagnation_count = 0
+    bestIntGap = Inf
+    stagnationCount = 0
 
     # Randomized rounding parameters
-    attempts = max(1, length(all_integers))
-    
+    attempts = max(1, length(intIndices))
+
     # FW escape flag and buffer
-    fw_escaped = false
+    fwEscaped = false
     x_round_escape = zeros(Float64, nvars)
 
     # TODO: store the best solution found across iterations, not just the first one
     found_solution = nothing
 
-    f, grad! = build_fw_functions(heur.config.projection_norm, all_integers)
-    ls = build_line_search(heur.config.line_search)
+    f, grad! = build_fw_functions(heur.config.projectionNorm, intIndices)
+    ls = build_line_search(heur.config.lineSearch)
 
     # FW step trajectory within one FP iteration: (step, x, objective)
-    fw_traj = Vector{Tuple{Int, Vector{Float64}, Float64}}()
-    fw_callback = (state, args...) -> begin
+    fwTraj = Vector{Tuple{Int, Vector{Float64}, Float64}}()
+    fwCallback = (state, args...) -> begin
         # Skip FW bookkeeping steps where d and gamma are not meaningful
         if state.step_type === FrankWolfe.ST_LAST || state.step_type === FrankWolfe.ST_POSTPROCESS
             return true
@@ -94,14 +92,16 @@ function SCIP.find_primal_solution(
 
         # Compute next iterate and log it
         x_after .= state.x .- state.gamma .* state.d
-        push!(fw_traj, (state.t, copy(x_after), state.primal))
+        push!(fwTraj, (state.t, copy(x_after), state.primal))
 
         # Check if x_after rounds to a different target than x_round
         # If so, stop FW early and use x_after as the new starting point
-        round_solution!(x_round_escape, x_after, all_integers, DEF_ROUNDING_THRESHOLD)
-        if !are_equal_vectors(all_integers, x_round_escape, x_round)
-            fw_escaped = true
-            return false  # stop FW iter early
+        if DEF_FW_ESCAPE
+            round_solution!(x_round_escape, x_after, intIndices, DEF_ROUNDING_THRESHOLD)
+            if !are_equal_vectors(intIndices, x_round_escape, x_round)
+                fwEscaped = true
+                return false  # stop FW iter early
+            end
         end
 
         return true  # continue FW iter
@@ -109,33 +109,33 @@ function SCIP.find_primal_solution(
 
     # Main FPFW loop
     while true
-        stats.fp_iterations += 1
+        stats.fpIterations += 1
         if DEBUG_VERBOSE
-            println("\n--- FPFW Iteration $(stats.fp_iterations) ---")
+            printstyled("\n--- FPFW Iteration $(stats.fpIterations) ---\n"; color=:blue)
         end
 
         # Check time limit
-        if time() - heur.global_start_time > DEF_GLOBAL_TIME_LIMIT
-            stats.exit_reason = :time_limit
+        if time() - heur.globalStartTime > DEF_GLOBAL_TIME_LIMIT
+            stats.exitReason = :time_limit
             break
         end
 
-        if heur.config.rand_round && stats.fp_iterations > 1  # skip randomized rounding in the first iteration to save time
-            rr_iter_start = time()
+        if heur.config.randRound && stats.fpIterations > 1  # skip randomized rounding in the first iteration to save time
+            rrStartTime = time()
             for _ in 1:attempts
-                if time() - rr_iter_start > DEF_RR_TIME_LIMIT
+                if time() - rrStartTime > DEF_RR_TIME_LIMIT
                     break
                 end
 
-                for i in all_integers
+                for i in intIndices
                     frac = x[i] - floor(x[i])
                     x_temp[i] = rand() < frac ? ceil(x[i]) : floor(x[i])
                 end
 
                 if check_feasibility(scip, x_temp, col_to_idx)
                     if submit_solution_to_scip(scip, heur_ptr, lp_cols, x_temp, nvars)
-                        stats.solution_found = true
-                        stats.exit_reason = :rr_solution_found
+                        stats.solutionFound = true
+                        stats.exitReason = :rr_solution_found
                         result = SCIP.SCIP_FOUNDSOL
 
                         if DEBUG_VERBOSE
@@ -150,21 +150,40 @@ function SCIP.find_primal_solution(
                 end
             end
 
-            stats.rr_time += time() - rr_iter_start
+            stats.rrTime += time() - rrStartTime
                 
-            if stats.solution_found
+            if stats.solutionFound
                 break
             end
         end
 
-        # Step 1: Rounding LP feasible solution with custom threshold
-        round_solution!(x_round, x, all_integers, DEF_ROUNDING_THRESHOLD)
+        if stagnationCount >= DEF_MAX_STAGNATION
+            stats.restartCount += 1
+
+            if stats.restartCount >= DEF_MAX_RESTARTS
+                stats.exitReason = :restart_limit
+                break
+            end
+
+            if DEBUG_VERBOSE
+                println("Cycle detected at iteration $(stats.fpIterations) (restart #$(stats.restartCount))")
+                println("Perturbing:")
+            end
+
+            Random.seed!(DEF_RANDOM_SEED + stats.restartCount)  # change seed each restart for reproducibility
+            perturb_solution!(x, x_round, binary, integer, lp_cols)
+
+            stagnationCount = 0
+            bestIntGap = Inf
+        else
+            round_solution!(x_round, x, intIndices, DEF_ROUNDING_THRESHOLD)
+        end
 
         # Check if rounded solution is feasible
         if check_feasibility(scip, x_round, col_to_idx)
             if submit_solution_to_scip(scip, heur_ptr, lp_cols, x_round, nvars)
-                stats.solution_found = true
-                stats.exit_reason = :solution_found
+                stats.solutionFound = true
+                stats.exitReason = :solutionFound
                 result = SCIP.SCIP_FOUNDSOL
 
                 if DEBUG_VERBOSE
@@ -180,111 +199,64 @@ function SCIP.find_primal_solution(
 
         if DEBUG_VERBOSE
             println("Rounding(threshold=$(DEF_ROUNDING_THRESHOLD)):")
-            for i in all_integers
+            for i in intIndices
                 @printf("  x[%d]: %.3f -> %.1f\n", i, x[i], x_round[i])
             end
             println("------------------------\n")
         end
 
         # Reset FW escape flag and trajectory
-        fw_escaped = false
-        empty!(fw_traj)
+        fwEscaped = false
+        empty!(fwTraj)
 
         # Step 2: "Projection" using Frank-Wolfe
-        remaining_time = DEF_GLOBAL_TIME_LIMIT - (time() - heur.global_start_time)
-        fw_start = time()
+        remainingTime = DEF_GLOBAL_TIME_LIMIT - (time() - heur.globalStartTime)
+        fwStartTime = time()
 
-        fw_result = run_fw(
-            heur.config.fw_variant,
+        fwResult = run_fw(
+            heur.config.fwVariant,
             x -> f(x, x_round),
             (storage, x) -> grad!(storage, x, x_round),
             heur.lmo,
             x,
-            active_set,
-            heur.config.warm_start,
+            activeSet,
+            heur.config.warmStart,
             ls,
-            fw_callback,
-            remaining_time
+            fwCallback,
+            remainingTime
         )
 
+        stats.fwTime += time() - fwStartTime
+        fwIters = length(fwTraj)
+        stats.fwIterations += fwIters
+
         # If FW gives us intermediate solutions via callback that escape the rounding target, we immediately jump to next iteration with the escaped solution
-        if fw_escaped
+        if fwEscaped
             x .= x_after
             prev_x .= x_after
             continue  # skip rest of checks and go to next FPFW iteration
         else
-            x_new = fw_result.x
-            if heur.config.warm_start && heur.config.fw_variant !== :vanilla
-                active_set = fw_result.active_set
+            x_new = fwResult.x
+            if heur.config.warmStart && heur.config.fwVariant !== :vanilla
+                activeSet = fwResult.activeSet
             end
         end
 
         # Cycle detection: check if we've visited this solution before
-        int_gap = f(x_new, x_round)
+        intGap = f(x_new, x_round)
 
-        if is_lower_than(int_gap, best_int_gap)
-            best_int_gap = int_gap
-            stagnation_count = 0  # reset stagnation count if we made progress
+        if is_lower_than(intGap, bestIntGap)
+            bestIntGap = intGap
+            stagnationCount = 0  # reset stagnation count if we made progress
         else
-            stagnation_count += 1
+            stagnationCount += 1
         end
-
-        if stagnation_count >= DEF_MAX_STAGNATION
-            stats.restarts += 1
-
-            if stats.restarts >= DEF_MAX_RESTARTS
-                stats.exit_reason = :restart_limit
-                break
-            end
-
-            if DEBUG_VERBOSE
-                println("Cycle detected at iteration $(stats.fp_iterations) (restart #$(stats.restarts))")
-                println("Perturbing:")
-            end
-
-            perturb_solution!(x, x_round, binary, integer, lp_cols)
-
-            stagnation_count = 0
-            best_int_gap = Inf
-
-            # Re-run FW with perturbed x_round so perturbation takes effect immediately
-            remaining_time = DEF_GLOBAL_TIME_LIMIT - (time() - heur.global_start_time)
-            fw_escaped = false
-
-            fw_result_perturbed = run_fw(
-                heur.config.fw_variant,
-                x -> f(x, x_round),
-                (storage, x) -> grad!(storage, x, x_round),
-                heur.lmo,
-                x,
-                active_set,
-                heur.config.warm_start,
-                ls,
-                fw_callback,
-                remaining_time
-            )
-
-            if fw_escaped
-                x .= x_after
-                prev_x .= x_after
-                continue
-            else
-                x_new .= fw_result_perturbed.x
-                if heur.config.warm_start && heur.config.fw_variant !== :vanilla
-                    active_set = fw_result_perturbed.active_set
-                end
-            end
-        end
-
-        stats.fw_time += time() - fw_start
-        fw_iters = length(fw_traj)
-        stats.fw_iterations += fw_iters
 
         if DEBUG_VERBOSE
-            for (t, xk, fk) in fw_traj
+            for (t, xk, fk) in fwTraj
                 println("--- FW Step $t ---")
                 println("Solution:")
-                for i in all_integers
+                for i in intIndices
                     @printf("  x[%d]: %.3f\n", i, xk[i])
                 end
                 @printf("Objective = %.3f\n\n", fk)
@@ -292,8 +264,8 @@ function SCIP.find_primal_solution(
         end
 
         # Step 3: Check feasibility, integrality, distance moved, and objective value
-        is_integral = check_integrality(x_new, all_integers)
-        is_feasible = check_feasibility(scip, x_new, col_to_idx)
+        isIntegral = check_integrality(x_new, intIndices)
+        isFeasible = check_feasibility(scip, x_new, col_to_idx)
 
         if DEBUG_VERBOSE
             obj_val = sum(x_new[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lp_cols[j])) for j in 1:nvars)
@@ -303,20 +275,20 @@ function SCIP.find_primal_solution(
             nfrac_integer = count(i -> abs(x_new[i] - round(x_new[i])) > DEF_TOLERANCE, integer)
 
             @printf("[Iter %d] obj=%.3f | distance_moved=%.3f | integrality_gap=%.3f | frac_bin=%d/%d | frac_int=%d/%d | fw_iters=%d | integral=%s |feasible=%s\n",
-                stats.fp_iterations, obj_val, dist_moved, int_gap, nfrac_binary, length(binary), nfrac_integer, length(integer), fw_iters, is_integral, is_feasible)
+                stats.fpIterations, obj_val, dist_moved, int_gap, nfrac_binary, length(binary), nfrac_integer, length(integer), fwIters, isIntegral, isFeasible)
         end
 
         # Safety check: FW must always return a feasible point (LP polytope is preserved)
-        if !is_feasible
-            stats.exit_reason = :infeasible_fw
+        if !isFeasible
+            stats.exitReason = :infeasible_fw
             break
         end
 
-        if is_integral
+        if isIntegral
             # Submit solution to SCIP
             if submit_solution_to_scip(scip, heur_ptr, lp_cols, x_new, nvars)
-                stats.solution_found = true
-                stats.exit_reason = :solution_found
+                stats.solutionFound = true
+                stats.exitReason = :solutionFound
                 result = SCIP.SCIP_FOUNDSOL
 
                 if DEBUG_VERBOSE
@@ -328,7 +300,7 @@ function SCIP.find_primal_solution(
                 end
                 break
             else
-                stats.exit_reason = :solution_rejected
+                stats.exitReason = :solution_rejected
                 break
             end
         else
@@ -339,12 +311,12 @@ function SCIP.find_primal_solution(
     end
 
     # Print final summary
-    stats.heur_time = time() - heur_start_time
-    total_time = time() - heur.global_start_time
-    objective = SCIP.SCIPgetNSols(scip) > 0 ? Float64(SCIP.SCIPgetPrimalbound(scip)) : nothing
-    gap = Float64(SCIP.SCIPgetGap(scip))
+    stats.heurTime = time() - startTime
+    stats.totalTime = time() - heur.globalStartTime
+    stats.primalBound = SCIP.SCIPgetNSols(scip) > 0 ? Float64(SCIP.SCIPgetPrimalbound(scip)) : nothing
+    stats.gap = Float64(SCIP.SCIPgetGap(scip))
 
-    print_heuristic_summary(stats, total_time, objective, gap)
+    print_heuristic_summary(stats)
 
     return (SCIP.SCIP_OKAY, result)
 end

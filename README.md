@@ -31,7 +31,7 @@ until x is integral or time limit / max iterations
 
 - **Four FW variants**: `vanilla`, `away`, `blended_pairwise`, `blended`
 
-- **Four line search strategies**: `agnostic`, `backtracking`, `secant`, `adaptive`
+- **Four line search strategies**: `unitary`, `agnostic`, `backtracking`, `secant`, `adaptive`
 
 - **Cycle detection**:
   - *Rounding cycle*: same rounded solution visited again → perturb rounding target
@@ -41,7 +41,7 @@ until x is integral or time limit / max iterations
 ## Usage
 
 ```bash
-julia --project run_test.jl <instance.mps> [euclidean|manhattan|smooth_manhattan] [vanilla|away|blended_pairwise|blended] [agnostic|backtracking|secant|adaptive] [rand_round=true|false] [warm_start=true|false]
+julia --project run_test.jl <instance.mps> [euclidean|manhattan|smooth_manhattan] [vanilla|away|blended_pairwise|blended] [unitary|agnostic|backtracking|secant|adaptive]
 ```
 
 All arguments after `instance.mps` are optional and fall back to the defaults in `dependencies.jl`.
@@ -50,8 +50,6 @@ Examples:
 ```bash
 julia --project run_test.jl ./testcase/test1.mps
 julia --project run_test.jl ./testcase/test1.mps euclidean away adaptive
-julia --project run_test.jl ./testcase/test1.mps euclidean away adaptive true false
-julia --project run_test.jl ./testcase/test1.mps manhattan away agnostic false true
 ```
 
 ## Parameters

@@ -9,10 +9,10 @@ function build_lmo_from_scip_lp(scip::Ptr{SCIP.SCIP_}, nvars, nrows)
     lp_rows = unsafe_wrap(Vector{Ptr{SCIP.SCIP_ROW}}, ptr_rows, nrows)
 
     # Build LMO model
-    opt_model = SCIP.Optimizer()
-    MOI.set(opt_model, MOI.RawOptimizerAttribute("presolving/maxrounds"), 0)
-    MOI.set(opt_model, MOI.RawOptimizerAttribute("display/verblevel"), 0)
-    x = MOI.add_variables(opt_model, nvars)
+    optModel = SCIP.Optimizer()
+    MOI.set(optModel, MOI.RawOptimizerAttribute("presolving/maxrounds"), 0)
+    MOI.set(optModel, MOI.RawOptimizerAttribute("display/verblevel"), 0)
+    x = MOI.add_variables(optModel, nvars)
 
     # Add variable bounds
     for j in 1:nvars
@@ -23,15 +23,15 @@ function build_lmo_from_scip_lp(scip::Ptr{SCIP.SCIP_}, nvars, nrows)
         lb = SCIP.SCIPvarGetLbLocal(var)
         ub = SCIP.SCIPvarGetUbLocal(var)
 
-        # if lb <= -SCIP.SCIPinfinity(scip) || ub >= SCIP.SCIPinfinity(scip)                                                                                                                                                                
-        #     println("  var $j: lb=$lb  ub=$ub  (UNBOUNDED)")                                                                                                                                                                              
+        # if lb <= -SCIP.SCIPinfinity(scip) || ub >= SCIP.SCIPinfinity(scip)
+        #     println("  var $j: lb=$lb  ub=$ub  (UNBOUNDED)")
         # end
-        
+
         if lb > -SCIP.SCIPinfinity(scip)
-            MOI.add_constraint(opt_model, x[j], MOI.GreaterThan(lb))
+            MOI.add_constraint(optModel, x[j], MOI.GreaterThan(lb))
         end
         if ub < SCIP.SCIPinfinity(scip)
-            MOI.add_constraint(opt_model, x[j], MOI.LessThan(ub))
+            MOI.add_constraint(optModel, x[j], MOI.LessThan(ub))
         end
     end
 
@@ -54,13 +54,13 @@ function build_lmo_from_scip_lp(scip::Ptr{SCIP.SCIP_}, nvars, nrows)
         rhs = SCIP.SCIProwGetRhs(row) - constant
 
         if lhs > -SCIP.SCIPinfinity(scip)
-            MOI.add_constraint(opt_model, aff, MOI.GreaterThan(lhs))
+            MOI.add_constraint(optModel, aff, MOI.GreaterThan(lhs))
         end
         if rhs < SCIP.SCIPinfinity(scip)
-            MOI.add_constraint(opt_model, aff, MOI.LessThan(rhs))
+            MOI.add_constraint(optModel, aff, MOI.LessThan(rhs))
         end
     end
 
     # use_modify = false to set a new objective each iteration without modifying the model structure
-    return FrankWolfe.MathOptLMO(opt_model, false)  # might be slower, but safer
+    return FrankWolfe.MathOptLMO(optModel, false)  # might be slower, but safer
 end

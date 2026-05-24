@@ -14,27 +14,27 @@ function call_fw_variant(variant::Symbol, f, grad!, lmo, x0; kwargs...)
 end
 
 # Function to dispatch Frank-Wolfe variant with active set (for warm-starting)
-function call_fw_variant(variant::Symbol, f, grad!, lmo, active_set::FrankWolfe.ActiveSet; kwargs...)                                                                                                                             
-    if variant == :vanilla                                                                                                                                                                                                      
+function call_fw_variant(variant::Symbol, f, grad!, lmo, activeSet::FrankWolfe.ActiveSet; kwargs...)
+    if variant == :vanilla
         error("Vanilla FW variant does not have an active set.")
-    elseif variant == :away                                                                                                                                                                                                       
-        FrankWolfe.away_frank_wolfe(f, grad!, lmo, active_set; kwargs...)
-    elseif variant == :blended_pairwise                                                                                                                                                                                           
-        FrankWolfe.blended_pairwise_conditional_gradient(f, grad!, lmo, active_set; kwargs...)                                                                                                                                  
-    elseif variant == :blended                                                                                                                                                                                                    
-        FrankWolfe.blended_conditional_gradient(f, grad!, lmo, active_set; kwargs...)
-    else                                                                                                                                                                                                                          
-        error("Unknown FW variant: $variant. Choose from :away, :blended_pairwise, :blended")                                                                                                                         
-    end                                                                                                                                                                                                                           
+    elseif variant == :away
+        FrankWolfe.away_frank_wolfe(f, grad!, lmo, activeSet; kwargs...)
+    elseif variant == :blended_pairwise
+        FrankWolfe.blended_pairwise_conditional_gradient(f, grad!, lmo, activeSet; kwargs...)
+    elseif variant == :blended
+        FrankWolfe.blended_conditional_gradient(f, grad!, lmo, activeSet; kwargs...)
+    else
+        error("Unknown FW variant: $variant. Choose from :away, :blended_pairwise, :blended")
+    end
 end
 
-function build_fw_functions(norm::Symbol, all_integers::Vector{Int})
+function build_fw_functions(norm::Symbol, intIndices::Vector{Int})
     if norm == :manhattan
-        f = (x, x_round) -> sum(abs(x[i] - x_round[i]) for i in all_integers)
+        f = (x, x_round) -> sum(abs(x[i] - x_round[i]) for i in intIndices)
 
         grad! = (storage, x, x_round) -> begin
             storage .= 0.0
-            for i in all_integers
+            for i in intIndices
                 d = x[i] - x_round[i]
                 storage[i] = d > 0 ? 1.0 : d < 0 ? -1.0 : 0.0
             end
@@ -43,11 +43,11 @@ function build_fw_functions(norm::Symbol, all_integers::Vector{Int})
 
     # check
     elseif norm == :smooth_manhattan
-        f = (x, x_round) -> sum(sqrt((x[i] - x_round[i])^2 + DEF_TOLERANCE) for i in all_integers)
+        f = (x, x_round) -> sum(sqrt((x[i] - x_round[i])^2 + DEF_TOLERANCE) for i in intIndices)
 
         grad! = (storage, x, x_round) -> begin
             storage .= 0.0
-            for i in all_integers
+            for i in intIndices
                 d = x[i] - x_round[i]
                 storage[i] = d / sqrt(d^2 + DEF_TOLERANCE)
             end
@@ -55,11 +55,11 @@ function build_fw_functions(norm::Symbol, all_integers::Vector{Int})
         end
 
     elseif norm == :euclidean
-        f = (x, x_round) -> 0.5 * sum((x[i] - x_round[i])^2 for i in all_integers)
+        f = (x, x_round) -> 0.5 * sum((x[i] - x_round[i])^2 for i in intIndices)
 
         grad! = (storage, x, x_round) -> begin
             storage .= 0.0
-            for i in all_integers
+            for i in intIndices
                 storage[i] = x[i] - x_round[i]
             end
             return storage
@@ -72,31 +72,31 @@ function build_fw_functions(norm::Symbol, all_integers::Vector{Int})
     return f, grad!
 end
 
-function build_line_search(line_search::Symbol)
-    if line_search == :unitary
+function build_line_search(lineSearch::Symbol)
+    if lineSearch == :unitary
         FrankWolfe.FixedStep(1.0)
-    elseif line_search == :agnostic
+    elseif lineSearch == :agnostic
         FrankWolfe.Agnostic()
-    elseif line_search == :backtracking
+    elseif lineSearch == :backtracking
         FrankWolfe.Backtracking()
-    elseif line_search == :secant
+    elseif lineSearch == :secant
         FrankWolfe.Secant()
-    elseif line_search == :adaptive
+    elseif lineSearch == :adaptive
         FrankWolfe.Adaptive()
     else
-        error("Unknown line search: $line_search. Choose from :agnostic, :backtracking, :secant, :adaptive")
+        error("Unknown line search: $lineSearch. Choose from :agnostic, :backtracking, :secant, :adaptive")
     end
 end
 
-function run_fw(variant, f, grad!, lmo, x0, active_set, warm_start, ls, callback, remaining_time)
-    if warm_start && active_set !== nothing && variant !== :vanilla
-        call_fw_variant(variant, f, grad!, lmo, active_set,
+function run_fw(variant, f, grad!, lmo, x0, activeSet, warmStart, ls, callback, remainingTime)
+    if warmStart && activeSet !== nothing && variant !== :vanilla
+        call_fw_variant(variant, f, grad!, lmo, activeSet,
             max_iteration = DEF_FW_MAX_ITER,
             verbose = false,
             line_search = ls,
             epsilon = DEF_FW_TOLERANCE,
             callback = callback,
-            timeout = remaining_time
+            timeout = remainingTime
         )
     else
         call_fw_variant(variant, f, grad!, lmo, x0,
@@ -105,7 +105,7 @@ function run_fw(variant, f, grad!, lmo, x0, active_set, warm_start, ls, callback
             line_search = ls,
             epsilon = DEF_FW_TOLERANCE,
             callback = callback,
-            timeout = remaining_time
+            timeout = remainingTime
         )
     end
 end

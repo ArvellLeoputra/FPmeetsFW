@@ -8,31 +8,35 @@ import MathOptInterface
 const MOI = MathOptInterface
 
 struct FPFWConfig
-    projection_norm::Symbol
-    fw_variant::Symbol
-    line_search::Symbol
-    rand_round::Bool
-    warm_start::Bool
+    projectionNorm::Symbol
+    fwVariant::Symbol
+    lineSearch::Symbol
+    randRound::Bool
+    warmStart::Bool
 end
 
 mutable struct FPFWHeuristic <: SCIP.Heuristic
     called::Int64
     lmo::Union{Nothing, FrankWolfe.MathOptLMO}
     config::FPFWConfig 
-    global_start_time::Float64
+    globalStartTime::Float64
 end
 
 mutable struct FPFWStats
-    heur_time::Float64
-    rr_time::Float64
-    fw_time::Float64
-    fw_iterations::Int
-    fp_iterations::Int
-    restarts::Int
-    solution_found::Bool
-    exit_reason::Symbol  # :none, :time_limit, :restart_limit, :infeasible_fw, :solution_found, :rr_solution_found, :solution_rejected, :scip_time_limit, :scip_solved
+    primalBound::Union{Float64, Nothing}
+    dualBound::Float64
+    gap::Float64
+    totalTime::Float64
+    heurTime::Float64
+    rrTime::Float64
+    fwTime::Float64
+    fwIterations::Int
+    fpIterations::Int
+    restartCount::Int
+    solutionFound::Bool
+    exitReason::Symbol  # :none, :time_limit, :restart_limit, :infeasible_fw, :solution_found, :rr_solution_found, :solution_rejected, :scip_time_limit, :scip_solved
 
-    FPFWStats() = new(0.0, 0.0, 0.0, 0, 0, 0, false, :none)
+    FPFWStats() = new(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, 0, false, :none)
 end
 
 # Default tolerance for feasibility/integrality checks and FW convergence
@@ -45,6 +49,9 @@ const DEF_FW_MAX_ITER = 300
 # Time limit
 const DEF_GLOBAL_TIME_LIMIT = 480.0
 const DEF_SCIP_TIME_LIMIT = 300.0
+
+# FW escape check: check if FW escapes its rounding point
+const DEF_FW_ESCAPE = false
 
 # Perturbation parameters
 const DEF_PERTURB_FRACTION = 0.2   # Fraction of binary vars to flip when cycle detected
