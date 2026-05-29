@@ -249,6 +249,21 @@ function SCIP.find_primal_solution(
             end
         end
 
+        feasible, sol = lp_diving!(scip, lp_cols, intIndices, x_round, nvars)                                                                                                                                                              
+        if feasible
+            if submit_solution_to_scip(scip, heur_ptr, lp_cols, sol, nvars)
+                stats.solutionFound = true
+                stats.exitReason = :solutionFound
+                result = SCIP.SCIP_FOUNDSOL
+                obj = sum(sol[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lp_cols[j])) for j in 1:nvars)
+                iterTime = time() - iterStartTime
+                if !DEBUG_VERBOSE
+                    print_row!(pump_display, stats.pumpIterations, obj, 0.0, NaN, 0, 0, iterTime, restarted ? "restart+divingLP" : "divingLP")
+                end
+                break
+            end
+        end
+
         # Reset FW escape flag and trajectory
         fwEscaped = false
         empty!(fwTraj)

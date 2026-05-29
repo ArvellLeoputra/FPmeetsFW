@@ -185,6 +185,44 @@ function perturb_solution!(
     end
 end
 
+function lp_diving!(
+    scip::Ptr{SCIP.SCIP_},
+    lp_cols::Vector{Ptr{SCIP.SCIP_COL}},
+    intIndices::Vector{Int},
+    x_round::Vector{Float64},
+    nvars::Int32
+)::Tuple{Bool, Vector{Float64}}
+
+    SCIP.SCIPstartDive(scip)
+    
+    try
+        for i in intIndices
+            var = SCIP.SCIPcolGetVar(lp_cols[i])
+
+            SCIP.SCIPchgVarLbDive(scip, var, x_round[i])
+            SCIP.SCIPchgVarUbDive(scip, var, x_round[i])
+        end
+
+        lperror = Ref{SCIP.SCIP_Bool}(SCIP.FALSE)
+        cutoff  = Ref{SCIP.SCIP_Bool}(SCIP.FALSE)
+
+        SCIP.SCIPsolveDiveLP(scip, -1, lperror, cutoff)
+
+        if lperror[] == SCIP.TRUE || cutoff[] == SCIP.TRUE
+            return false, Float64[]
+        end
+
+        if SCIP.SCIPgetLPSolstat(scip) == SCIP.SCIP_LPSOLSTAT_OPTIMAL
+            sol = [SCIP.SCIPcolGetPrimsol(lp_cols[j]) for j in 1:nvars]
+            return true, sol
+        else
+            return false, Float64[]
+        end
+    finally
+        SCIP.SCIPendDive(scip)
+    end
+end
+
 # Helper function to check constraint feasibility
 function check_feasibility(
     scip::Ptr{SCIP.SCIP_},
