@@ -32,8 +32,8 @@ function mps_test_model(fileName::String, config::FPFWConfig, globalStartTime::F
     println("fwVariant = $(config.fwVariant)")
     println("lineSearch = $(config.lineSearch)")
     println("randomizedRounding = $(config.randRound ? "enabled" : "disabled")")
+    println("randomizedFeasibilityCheck = $(config.randFeasCheck ? "enabled" : "disabled")")
     println("warmStart = $(config.warmStart ? "enabled" : "disabled")")
-    println("roundThreshold = $DEF_ROUNDING_THRESHOLD")
 
     heur = FPFWHeuristic(
         0,
@@ -100,7 +100,7 @@ if projectionNorm == :manhattan && lineSearch ∈ (:adaptive, :secant)
     error("manhattan norm requires a smooth objective — use agnostic or backtracking line search instead")
 end
 
-config = FPFWConfig(projectionNorm, fwVariant, lineSearch, DEF_RAND_ROUND, DEF_WARM_START)
+config = FPFWConfig(projectionNorm, fwVariant, lineSearch, DEF_RAND_ROUND, DEF_RAND_FEAS_CHECK, DEF_WARM_START)
 startTime = time()
 
 if DEF_RANDOM_SEED !== nothing

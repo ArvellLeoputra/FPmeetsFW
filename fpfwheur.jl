@@ -68,7 +68,7 @@ function SCIP.find_primal_solution(
     restarted = false
 
     # Randomized rounding parameters
-    attempts = max(1, length(intIndices))
+    attempts = min(DEF_RAND_FEAS_ITER_LIMIT, length(intIndices))
 
     # FW escape flag and buffer
     fwEscaped = false
@@ -99,7 +99,7 @@ function SCIP.find_primal_solution(
         # Check if x_after rounds to a different target than x_round
         # If so, stop FW early and use x_after as the new starting point
         if DEF_FW_ESCAPE
-            round_solution!(x_round_escape, x_after, intIndices, DEF_ROUNDING_THRESHOLD)
+            round_solution!(x_round_escape, x_after, intIndices, heur.config.randRound)
             if !are_equal_vectors(intIndices, x_round_escape, x_round)
                 fwEscaped = true    
                 
@@ -163,13 +163,9 @@ function SCIP.find_primal_solution(
             break
         end
 
-        if heur.config.randRound && stats.pumpIterations > 1  # skip randomized rounding in the first iteration to save time
+        if heur.config.randFeasCheck && stats.pumpIterations > 1  # skip randomized rounding in the first iteration to save time
             rrStartTime = time()
             for _ in 1:attempts
-                if time() - rrStartTime > DEF_RR_TIME_LIMIT
-                    break
-                end
-
                 for i in intIndices
                     frac = x[i] - floor(x[i])
                     x_temp[i] = rand() < frac ? ceil(x[i]) : floor(x[i])
@@ -198,7 +194,7 @@ function SCIP.find_primal_solution(
                 obj = sum(x_temp[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lp_cols[j])) for j in 1:nvars)                                                                                                                        
                 iterTime = time() - iterStartTime                                                                                                                                                                                 
                 if !DEBUG_VERBOSE
-                    print_row!(pump_display, stats.pumpIterations, obj, NaN, NaN, 0, 0, iterTime, "randRound")
+                    print_row!(pump_display, stats.pumpIterations, obj, NaN, NaN, 0, 0, iterTime, "randFeasCheck")
                 end
                 break                                                                                                                                                                                                             
             end
@@ -224,7 +220,7 @@ function SCIP.find_primal_solution(
             bestIntGap = Inf
             restarted = true
         else
-            round_solution!(x_round, x, intIndices, DEF_ROUNDING_THRESHOLD)
+            round_solution!(x_round, x, intIndices, heur.config.randRound)
         end
 
         if DEBUG_VERBOSE

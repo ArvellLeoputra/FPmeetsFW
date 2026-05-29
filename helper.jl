@@ -127,16 +127,22 @@ function extract_lp_data(
     return lp_cols, lp_rows, col_to_idx, binary, integer, current_solution
 end
 
+# Rounding threshold generator
+function get_rounding_threshold(random::Bool)
+    return random ? rand() : 0.5
+end
+
 # Rounding function using custom threshold
 function round_solution!(
     x_round::Vector{Float64},
     x::Vector{Float64},
     integer_indices::Vector{Int},
-    threshold::Float64
+    randRound::Bool
 )::Nothing
 
+    threshold = get_rounding_threshold(randRound)
     for i in integer_indices
-        x_round[i] = x[i] - floor(x[i]) >= threshold ? ceil(x[i]) : floor(x[i])
+        x_round[i] = floor(x[i] + threshold)
     end
 end
 

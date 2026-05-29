@@ -12,6 +12,7 @@ struct FPFWConfig
     fwVariant::Symbol
     lineSearch::Symbol
     randRound::Bool
+    randFeasCheck::Bool
     warmStart::Bool
 end
 
@@ -74,11 +75,11 @@ const DEF_BIGBIGM = 1e15           # Bigbig M constant for perturbations
 const DEF_RANDOM_SEED::Union{Nothing, Int} = 42
 
 # Rounding threshold for deciding when to round fractional solutions
-const DEF_ROUNDING_THRESHOLD = 0.5
+const DEF_RAND_ROUND = false
 
 # Randomized rounding parameters
-const DEF_RAND_ROUND = true
-const DEF_RR_TIME_LIMIT = 3.0
+const DEF_RAND_FEAS_CHECK = true
+const DEF_RAND_FEAS_ITER_LIMIT = 100
 
 # Warm-starting away/blended variants with the previous iteration's active set
 const DEF_WARM_START = true
