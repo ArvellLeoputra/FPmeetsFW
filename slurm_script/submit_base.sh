@@ -36,6 +36,8 @@ sbatch <<EOF || { echo "ERROR: sbatch failed for $NAME"; exit 1; }
 #SBATCH --output=/dev/null
 #SBATCH --error=/dev/null
 
+export PATH="/home/htc/aleoputra/scratch/julia-1.12.6/bin:\$PATH"
+
 INSTANCE=\$(ls "$INSTANCE_DIR" | grep -E '\.mps(\.gz)?$' | sort | sed -n "\${SLURM_ARRAY_TASK_ID}p")
 
 if [ -z "\$INSTANCE" ]; then
