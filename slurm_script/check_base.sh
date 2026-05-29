@@ -23,20 +23,17 @@ FOUND_FILE="$RESULT_DIR/solutions_found.txt"
 FAILED_FILE="$RESULT_DIR/failed_runs.txt"
 CSV_FILE="$RESULT_DIR/results.csv"
 
-CSV_HEADER="Instance,BinaryVars,IntegerVars,SolutionFound,TotalTime,FPIterations,FWIterations,Restarts,Objective,Gap,FailureReason,FailureType,ProjectionNorm,FWVariant,LineSearch,RoundingThreshold,RandRound,WarmStart"
+CSV_HEADER="Instance,BinaryVars,IntegerVars,SolutionFound,TotalTime,FPIterations,FWIterations,Restarts,Objective,Gap,FailureReason,FailureType,ProjectionNorm,FWVariant,LineSearch,RandRound,RandFeasCheck,WarmStart"
 echo "$CSV_HEADER" > "$CSV_FILE"
 
 echo "FPFW Solution Analysis [$NAME] - $(date)" > "$SUMMARY_FILE"
 echo "==========================================================" >> "$SUMMARY_FILE"
-
-rounding_threshold=$(grep "roundThreshold =" "$(ls "$OUTPUT_DIR"/*.out 2>/dev/null | head -1)" 2>/dev/null | head -1 | awk '{print $3}')
 
 echo "DETAILED RESULTS" > "$DETAILED_FILE"
 echo "==========================================================" >> "$DETAILED_FILE"
 echo "  Projection norm:    $NORM" >> "$DETAILED_FILE"
 echo "  FW variant:         $VARIANT" >> "$DETAILED_FILE"
 echo "  Line search:        $LS" >> "$DETAILED_FILE"
-echo "  Rounding threshold: $rounding_threshold" >> "$DETAILED_FILE"
 echo "==========================================================" >> "$DETAILED_FILE"
 echo "" >> "$DETAILED_FILE"
 
@@ -79,8 +76,8 @@ for output_file in "$OUTPUT_DIR"/*.out; do
     if [ -z "$projection_norm" ]; then projection_norm="$NORM"; fi
     fw_variant=$(grep "fwVariant =" "$output_file" | head -1 | awk '{print $3}')
     line_search=$(grep "lineSearch =" "$output_file" | head -1 | awk '{print $3}')
-    rounding_threshold=$(grep "roundThreshold =" "$output_file" | head -1 | awk '{print $3}')
     rand_round=$(grep "randomizedRounding =" "$output_file" | head -1 | awk '{print $3}')
+    rand_feas_check=$(grep "randomizedFeasibilityCheck =" "$output_file" | head -1 | awk '{print $3}')
     warm_start=$(grep "warmStart =" "$output_file" | head -1 | awk '{print $3}')
 
     binary_vars=$(grep "binaryVars =" "$output_file" | tail -1 | awk '{print $3}')
@@ -179,7 +176,7 @@ for output_file in "$OUTPUT_DIR"/*.out; do
         [ "$this_was_found" = "1" ] && found_binary=$((found_binary + 1)) || failed_binary=$((failed_binary + 1))
     fi
 
-    echo "${instance_name},${binary_vars},${integer_vars},${solution_found},${total_time},${fp_iterations},${fw_iterations},${restarts},${objective},${gap},${failure_reason},${failure_type},${projection_norm},${fw_variant},${line_search},${rounding_threshold},${rand_round},${warm_start}" >> "$CSV_FILE"
+    echo "${instance_name},${binary_vars},${integer_vars},${solution_found},${total_time},${fp_iterations},${fw_iterations},${restarts},${objective},${gap},${failure_reason},${failure_type},${projection_norm},${fw_variant},${line_search},${rand_round},${rand_feas_check},${warm_start}" >> "$CSV_FILE"
 
     echo "Instance: ${instance_name}" >> "$DETAILED_FILE"
     echo "  Binary variables:  ${binary_vars}" >> "$DETAILED_FILE"
