@@ -75,7 +75,7 @@ if !isfile(fileName)
     error("File not found: $fileName")
 end
 
-projectionNorm = length(ARGS) >= 2 ? Symbol(ARGS[2]) : :euclidean
+projectionNorm = length(ARGS) >= 2 ? Symbol(ARGS[2]) : :manhattan
 
 validNorms = (:euclidean, :manhattan, :smooth_manhattan)
 if projectionNorm ∉ validNorms

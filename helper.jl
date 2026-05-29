@@ -1,4 +1,4 @@
-function print_heuristic_summary(stats::FPFWStats)::Nothing
+function print_heuristic_summary(stats::FPFWStats)
     exit_msg = if stats.exitReason == :time_limit
         "global time limit $(DEF_GLOBAL_TIME_LIMIT)s reached"
     elseif stats.exitReason == :restart_limit
@@ -6,9 +6,9 @@ function print_heuristic_summary(stats::FPFWStats)::Nothing
     elseif stats.exitReason == :infeasible_fw
         "FW returned a point outside the feasible polytope (numerical error)"
     elseif stats.exitReason == :solutionFound
-        "integer feasible solution accepted by SCIP at iteration $(stats.fpIterations)"
+        "integer feasible solution accepted by SCIP at iteration $(stats.pumpIterations)"
     elseif stats.exitReason == :rr_solution_found
-        "integer feasible solution found by randomized rounding at iteration $(stats.fpIterations)"
+        "integer feasible solution found by randomized rounding at iteration $(stats.pumpIterations)"
     elseif stats.exitReason == :solution_rejected
         "integer feasible solution found but rejected by SCIP"
     elseif stats.exitReason == :scip_time_limit
@@ -31,11 +31,38 @@ function print_heuristic_summary(stats::FPFWStats)::Nothing
     println("totalHeurTime = $heurTime")
     println("fwTime = $(round(stats.fwTime, digits=2))s")
     println("randRoundTime = $(round(stats.rrTime, digits=2))s")
-    println("fpIterations = $(stats.fpIterations)")
+    println("pumpIterations = $(stats.pumpIterations)")
     println("fwIterations = $(stats.fwIterations)")
     println("restartCount = $(stats.restartCount)")
     println("solFound = $(stats.solutionFound)")
     println("exitReason = $exit_msg")
+end
+
+function add_column!(
+    display::PumpDisplay,
+    name::String,
+    width::Int,
+    decimals::Int = 0
+)
+
+    push!(display.column, PumpDisplayColumn(name, width, decimals))
+end
+
+function print_header!(display::PumpDisplay)
+    for col in display.column
+        print(rpad(col.name, col.width))
+    end
+    println()
+end
+
+function print_row!(display::PumpDisplay, values...)
+    for (col, val) in zip(display.column, values)
+        if val isa Float64
+            val = round(val, digits=col.decimals)
+        end
+        print(rpad(string(val), col.width))
+    end
+    println()
 end
 
 function is_equal_values(
@@ -74,10 +101,14 @@ end
 function extract_lp_data(
     scip::Ptr{SCIP.SCIP_},
     nvars::Int32,
+    nrows::Int32,
 )
     ptr_cols = SCIP.SCIPgetLPCols(scip)
     lp_cols = unsafe_wrap(Vector{Ptr{SCIP.SCIP_COL}}, ptr_cols, nvars)
     col_to_idx = Dict(lp_cols[k] => k for k in 1:nvars)
+
+    ptr_rows = SCIP.SCIPgetLPRows(scip)
+    lp_rows = unsafe_wrap(Vector{Ptr{SCIP.SCIP_ROW}}, ptr_rows, nrows)
 
     binary = Int[]
     integer = Int[]
@@ -93,7 +124,7 @@ function extract_lp_data(
         current_solution[j] = SCIP.SCIPcolGetPrimsol(lp_cols[j])
     end
 
-    return lp_cols, col_to_idx, binary, integer, current_solution
+    return lp_cols, lp_rows, col_to_idx, binary, integer, current_solution
 end
 
 # Rounding function using custom threshold
@@ -157,22 +188,15 @@ end
 # Helper function to check constraint feasibility
 function check_feasibility(
     scip::Ptr{SCIP.SCIP_},
+    lp_rows::Vector{Ptr{SCIP.SCIP_ROW}},
+    lp_cols::Vector{Ptr{SCIP.SCIP_COL}},
     solution::Vector{Float64},
     col_to_idx::Dict{Ptr{SCIP.SCIP_COL}, Int},
     tolerance::Float64=DEF_TOLERANCE
 )::Bool
 
-    ncols = SCIP.SCIPgetNLPCols(scip)
-    nrows = SCIP.SCIPgetNLPRows(scip)
-
-    ptr_rows = SCIP.SCIPgetLPRows(scip)
-    lp_rows = unsafe_wrap(Vector{Ptr{SCIP.SCIP_ROW}}, ptr_rows, nrows)
-
-    ptr_cols = SCIP.SCIPgetLPCols(scip)
-    lp_cols = unsafe_wrap(Vector{Ptr{SCIP.SCIP_COL}}, ptr_cols, ncols)
-
     # Check bounds
-    for j in 1:ncols
+    for j in 1:length(lp_cols)
         var = SCIP.SCIPcolGetVar(lp_cols[j])
         lb = SCIP.SCIPvarGetLbLocal(var)
         ub = SCIP.SCIPvarGetUbLocal(var)
@@ -183,7 +207,7 @@ function check_feasibility(
     end
 
     # Constraint check using rows
-    for i in 1:nrows
+    for i in 1:length(lp_rows)
         row = lp_rows[i]
 
         nnonz = SCIP.SCIProwGetNNonz(row)

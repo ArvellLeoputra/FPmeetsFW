@@ -30,13 +30,23 @@ mutable struct FPFWStats
     heurTime::Float64
     rrTime::Float64
     fwTime::Float64
+    pumpIterations::Int
     fwIterations::Int
-    fpIterations::Int
     restartCount::Int
     solutionFound::Bool
     exitReason::Symbol  # :none, :time_limit, :restart_limit, :infeasible_fw, :solution_found, :rr_solution_found, :solution_rejected, :scip_time_limit, :scip_solved
 
-    FPFWStats() = new(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, 0, false, :none)
+    FPFWStats() = new(nothing, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, 0, false, :none)
+end
+
+mutable struct PumpDisplayColumn
+    name::String
+    width::Int
+    decimals::Int
+end
+
+mutable struct PumpDisplay
+    column::Vector{PumpDisplayColumn}
 end
 
 # Default tolerance for feasibility/integrality checks and FW convergence
@@ -44,7 +54,7 @@ const DEF_TOLERANCE = 1e-6
 const DEF_FW_TOLERANCE = 1e-7
 
 # Iteration parameters
-const DEF_FW_MAX_ITER = 300
+const DEF_FW_MAX_ITER = 1
 
 # Time limit
 const DEF_GLOBAL_TIME_LIMIT = 480.0
@@ -56,7 +66,7 @@ const DEF_FW_ESCAPE = false
 # Perturbation parameters
 const DEF_PERTURB_FRACTION = 0.2   # Fraction of binary vars to flip when cycle detected
 const DEF_MAX_RESTARTS = 1000      # Maximum number of restarts before giving up
-const DEF_MAX_STAGNATION = 5       # Maximum number of iterations without improvement before perturbing
+const DEF_MAX_STAGNATION = 3       # Maximum number of iterations without improvement before perturbing
 const DEF_BIGM = 1e9               # Big M constant for cycle-breaking perturbations
 const DEF_BIGBIGM = 1e15           # Bigbig M constant for perturbations
 
@@ -74,13 +84,13 @@ const DEF_RR_TIME_LIMIT = 3.0
 const DEF_WARM_START = true
 
 # Frank-Wolfe variant: :vanilla, :away, :blended_pairwise, :blended
-const DEF_FW_VARIANT = :away
+const DEF_FW_VARIANT = :vanilla
 
-# Frank-Wolfe line search: :agnostic, :backtracking, :secant, :adaptive
-const DEF_LINE_SEARCH = :secant
+# Frank-Wolfe line search: :unitary, :agnostic, :backtracking, :secant, :adaptive
+const DEF_LINE_SEARCH = :unitary
 
 # Determine whether presolve on or off
-const DEF_PRESOLVE = false
+const DEF_PRESOLVE = true
 
 # Debug mode: set to true to print detailed step-by-step output
 const DEBUG_VERBOSE = false
