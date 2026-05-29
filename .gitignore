@@ -5,7 +5,6 @@
 .vscode/
 
 # Personal files
-slurm_script/
 testcase/
 benchmark_full/
 selection_benchmark/
