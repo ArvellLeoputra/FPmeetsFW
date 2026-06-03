@@ -8,7 +8,7 @@ import MathOptInterface
 const MOI = MathOptInterface
 
 struct FPFWConfig
-    projectionNorm::Symbol
+    projNorm::Symbol
     fwVariant::Symbol
     lineSearch::Symbol
     randRound::Bool
@@ -51,7 +51,7 @@ mutable struct PumpDisplay
 end
 
 # Default tolerance for feasibility/integrality checks and FW convergence
-const DEF_TOLERANCE = 1e-6
+const DEF_INT_TOLERANCE = 1e-6
 const DEF_FW_TOLERANCE = 1e-7
 
 # Iteration parameters
@@ -67,18 +67,18 @@ const DEF_FW_ESCAPE = false
 # Perturbation parameters
 const DEF_PERTURB_FRACTION = 0.2   # Fraction of binary vars to flip when cycle detected
 const DEF_MAX_RESTARTS = 1000      # Maximum number of restarts before giving up
-const DEF_MAX_STAGNATION = 3       # Maximum number of iterations without improvement before perturbing
+# const DEF_MAX_STAGNATION = 1       # Maximum number of iterations without improvement before perturbing
 const DEF_BIGM = 1e9               # Big M constant for cycle-breaking perturbations
 const DEF_BIGBIGM = 1e15           # Bigbig M constant for perturbations
 
 # Random seed for reproducibility; set to nothing to disable
 const DEF_RANDOM_SEED::Union{Nothing, Int} = 42
 
-# Rounding threshold for deciding when to round fractional solutions
+# Randomized rounding
 const DEF_RAND_ROUND = false
 
-# Randomized rounding parameters
-const DEF_RAND_FEAS_CHECK = true
+# Randomized rounding feasibility check parameters
+const DEF_RAND_FEAS_CHECK = false
 const DEF_RAND_FEAS_ITER_LIMIT = 100
 
 # Warm-starting away/blended variants with the previous iteration's active set

@@ -17,8 +17,8 @@ The **Frank-Wolfe** (FW) algorithm (also known as the conditional gradient metho
 ```
 x <- LP solution
 repeat:
-    x_round <- round(x)           # Round binary variables
-    x <- FrankWolfe(min ||x - x_round||, s.t. x is LP feasible)  # Project back
+    xRound <- round(x)           # Round binary variables
+    x <- FrankWolfe(min ||x - xRound||, s.t. x is LP feasible)  # Project back
 until x is integral or time limit / max iterations
 ```
 
@@ -27,7 +27,7 @@ until x is integral or time limit / max iterations
 - **Three projection norms**:
   - `euclidean`: Minimizes L2 distance (smooth, standard FP)
   - `manhattan`: Minimizes L1 distance (non-smooth)
-  - `smooth_manhattan`: Minimizes L1 distance with a smooth approximation
+  - `smoothManhattan`: Minimizes L1 distance with a smooth approximation
 
 - **Four FW variants**: `vanilla`, `away`, `blended_pairwise`, `blended`
 
@@ -41,7 +41,7 @@ until x is integral or time limit / max iterations
 ## Usage
 
 ```bash
-julia --project run_test.jl <instance.mps> [euclidean|manhattan|smooth_manhattan] [vanilla|away|blended_pairwise|blended] [unitary|agnostic|backtracking|secant|adaptive]
+julia --project run_test.jl <instance.mps> [euclidean|manhattan|smoothManhattan] [vanilla|away|blended_pairwise|blended] [unitary|agnostic|backtracking|secant|adaptive]
 ```
 
 All arguments after `instance.mps` are optional and fall back to the defaults in `dependencies.jl`.

@@ -28,7 +28,7 @@ function mps_test_model(fileName::String, config::FPFWConfig, globalStartTime::F
     println("presolve = $(DEF_PRESOLVE ? "enabled" : "disabled")")
 
     printstyled("[FPFW configs]\n", color=:cyan)
-    println("projectionNorm = $(config.projectionNorm)")
+    println("projectionNorm = $(config.projNorm)")
     println("fwVariant = $(config.fwVariant)")
     println("lineSearch = $(config.lineSearch)")
     println("randomizedRounding = $(config.randRound ? "enabled" : "disabled")")
@@ -59,14 +59,14 @@ function mps_test_model(fileName::String, config::FPFWConfig, globalStartTime::F
         stats.gap = Float64(SCIP.SCIPgetGap(scip))
         stats.solutionFound = SCIP.SCIPgetNSols(scip) > 0                                                                                                                                                                         
         stats.exitReason = stats.solutionFound ? :scip_solved : :scip_time_limit                                                                                                                                                
-        print_heuristic_summary(stats)
+        printHeurSummary(stats)
     end
 
     return nothing
 end
 
 if length(ARGS) < 1
-    error("Usage: julia --project run_test.jl <fileName.mps> [euclidean|manhattan|smooth_manhattan] [vanilla|away|blended_pairwise|blended] [agnostic|backtracking|secant|adaptive]")
+    error("Usage: julia --project run_test.jl <fileName.mps> [euclidean|manhattan|smoothManhattan] [vanilla|away|blended_pairwise|blended] [agnostic|backtracking|secant|adaptive]")
 end
 
 fileName = ARGS[1]
@@ -77,9 +77,9 @@ end
 
 projectionNorm = length(ARGS) >= 2 ? Symbol(ARGS[2]) : :manhattan
 
-validNorms = (:euclidean, :manhattan, :smooth_manhattan)
+validNorms = (:euclidean, :manhattan, :smoothManhattan)
 if projectionNorm ∉ validNorms
-    error("Invalid projection norm: $projectionNorm. Must be one of: $validNorms")
+    error("Invalid projection norm: $projNorm. Must be one of: $validNorms")
 end
 
 fwVariant = length(ARGS) >= 3 ? Symbol(ARGS[3]) : DEF_FW_VARIANT

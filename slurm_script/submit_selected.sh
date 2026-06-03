@@ -14,7 +14,7 @@ fi
 echo "Found $NUM_INSTANCES instances in $INSTANCE_DIR"
 
 # Explicit list of (NORM, VARIANT, LS) combinations
-NORMS=("manhattan" "manhattan" "euclidean" "euclidean" "euclidean" "smooth_manhattan" "smooth_manhattan" "smooth_manhattan")
+NORMS=("manhattan" "manhattan" "euclidean" "euclidean" "euclidean" "smoothManhattan" "smoothManhattan" "smoothManhattan")
 VARIANTS=("away" "blended_pairwise" "away" "away" "blended" "away" "away" "blended")
 LINESEARCHES=("agnostic" "agnostic" "secant" "adaptive" "adaptive" "secant" "adaptive" "adaptive")
 

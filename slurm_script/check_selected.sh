@@ -9,7 +9,7 @@ DEF_GLOBAL_TIME_LIMIT=$(grep 'const DEF_GLOBAL_TIME_LIMIT' "$BASE_DIR/dependenci
 DEF_SCIP_TIME_LIMIT=$(grep 'const DEF_SCIP_TIME_LIMIT' "$BASE_DIR/dependencies.jl" | grep -oE '[0-9]+(\.[0-9]+)?')
 
 # Explicit list of (NORM, VARIANT, LS) combinations — must match submit_selected.sh
-NORMS=("manhattan" "manhattan" "euclidean" "euclidean" "euclidean" "smooth_manhattan" "smooth_manhattan" "smooth_manhattan")
+NORMS=("manhattan" "manhattan" "euclidean" "euclidean" "euclidean" "smoothManhattan" "smoothManhattan" "smoothManhattan")
 VARIANTS=("away" "blended_pairwise" "away" "away" "blended" "away" "away" "blended")
 LINESEARCHES=("agnostic" "agnostic" "secant" "adaptive" "adaptive" "secant" "adaptive" "adaptive")
 

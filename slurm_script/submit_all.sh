@@ -13,7 +13,7 @@ if [ "$NUM_INSTANCES" -eq 0 ]; then
 fi
 echo "Found $NUM_INSTANCES instances in $INSTANCE_DIR"
 
-NORMS=("manhattan" "euclidean" "smooth_manhattan" "euclidean" "euclidean" "smooth_manhattan" "smooth_manhattan")
+NORMS=("manhattan" "euclidean" "smoothManhattan" "euclidean" "euclidean" "smoothManhattan" "smoothManhattan")
 LINESEARCHES=("agnostic" "agnostic" "agnostic" "adaptive" "secant" "adaptive" "secant")
 VARIANTS=("vanilla" "away" "blended_pairwise" "blended")
 

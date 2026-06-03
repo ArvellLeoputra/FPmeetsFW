@@ -1,5 +1,5 @@
 # Function to dispatch Frank-Wolfe variant (for cold-starting)
-function call_fw_variant(variant::Symbol, f, grad!, lmo, x0; kwargs...)
+function callFWVariant(variant::Symbol, f, grad!, lmo, x0; kwargs...)
     if variant == :vanilla
         FrankWolfe.frank_wolfe(f, grad!, lmo, x0; kwargs...)
     elseif variant == :away
@@ -14,7 +14,7 @@ function call_fw_variant(variant::Symbol, f, grad!, lmo, x0; kwargs...)
 end
 
 # Function to dispatch Frank-Wolfe variant with active set (for warm-starting)
-function call_fw_variant(variant::Symbol, f, grad!, lmo, activeSet::FrankWolfe.ActiveSet; kwargs...)
+function callFWVariant(variant::Symbol, f, grad!, lmo, activeSet::FrankWolfe.ActiveSet; kwargs...)
     if variant == :vanilla
         error("Vanilla FW variant does not have an active set.")
     elseif variant == :away
@@ -28,51 +28,51 @@ function call_fw_variant(variant::Symbol, f, grad!, lmo, activeSet::FrankWolfe.A
     end
 end
 
-function build_fw_functions(norm::Symbol, intIndices::Vector{Int})
+function buildFWFunctions(norm::Symbol, intIdx::Vector{Int})
     if norm == :manhattan
-        f = (x, x_round) -> sum(abs(x[i] - x_round[i]) for i in intIndices)
+        f = (x, xRound) -> sum(abs(x[i] - xRound[i]) for i in intIdx)
 
-        grad! = (storage, x, x_round) -> begin
+        grad! = (storage, x, xRound) -> begin
             storage .= 0.0
-            for i in intIndices
-                d = x[i] - x_round[i]
+            for i in intIdx
+                d = x[i] - xRound[i]
                 storage[i] = d > 0 ? 1.0 : d < 0 ? -1.0 : 0.0
             end
             return storage
         end
 
     # check
-    elseif norm == :smooth_manhattan
-        f = (x, x_round) -> sum(sqrt((x[i] - x_round[i])^2 + DEF_TOLERANCE) for i in intIndices)
+    elseif norm == :smoothManhattan
+        f = (x, xRound) -> sum(sqrt((x[i] - xRound[i])^2 + DEF_INT_TOLERANCE) for i in intIdx)
 
-        grad! = (storage, x, x_round) -> begin
+        grad! = (storage, x, xRound) -> begin
             storage .= 0.0
-            for i in intIndices
-                d = x[i] - x_round[i]
-                storage[i] = d / sqrt(d^2 + DEF_TOLERANCE)
+            for i in intIdx
+                d = x[i] - xRound[i]
+                storage[i] = d / sqrt(d^2 + DEF_INT_TOLERANCE)
             end
             return storage
         end
 
     elseif norm == :euclidean
-        f = (x, x_round) -> 0.5 * sum((x[i] - x_round[i])^2 for i in intIndices)
+        f = (x, xRound) -> 0.5 * sum((x[i] - xRound[i])^2 for i in intIdx)
 
-        grad! = (storage, x, x_round) -> begin
+        grad! = (storage, x, xRound) -> begin
             storage .= 0.0
-            for i in intIndices
-                storage[i] = x[i] - x_round[i]
+            for i in intIdx
+                storage[i] = x[i] - xRound[i]
             end
             return storage
         end
 
     else
-        error("Unknown norm: $norm. Choose from :euclidean, :manhattan, :smooth_manhattan")
+        error("Unknown norm: $norm. Choose from :euclidean, :manhattan, :smoothManhattan")
     end
 
     return f, grad!
 end
 
-function build_line_search(lineSearch::Symbol)
+function buildLineSearch(lineSearch::Symbol)
     if lineSearch == :unitary
         FrankWolfe.FixedStep(1.0)
     elseif lineSearch == :agnostic
@@ -90,7 +90,7 @@ end
 
 function run_fw(variant, f, grad!, lmo, x0, activeSet, warmStart, ls, callback, remainingTime)
     if warmStart && activeSet !== nothing && variant !== :vanilla
-        call_fw_variant(variant, f, grad!, lmo, activeSet,
+        callFWVariant(variant, f, grad!, lmo, activeSet,
             max_iteration = DEF_FW_MAX_ITER,
             verbose = false,
             line_search = ls,
@@ -99,7 +99,7 @@ function run_fw(variant, f, grad!, lmo, x0, activeSet, warmStart, ls, callback, 
             timeout = remainingTime
         )
     else
-        call_fw_variant(variant, f, grad!, lmo, x0,
+        callFWVariant(variant, f, grad!, lmo, x0,
             max_iteration = DEF_FW_MAX_ITER,
             verbose = false,
             line_search = ls,
