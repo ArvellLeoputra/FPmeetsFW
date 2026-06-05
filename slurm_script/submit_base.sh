@@ -3,7 +3,7 @@
 # Submit base FP-FW variant: manhattan + vanilla + unitary
 
 PROJECT_DIR="/home/htc/aleoputra/project/FPmeetsFW"
-INSTANCE_DIR="$PROJECT_DIR/benchmark_full"
+INSTANCE_DIR="$PROJECT_DIR/benchmark01"
 
 NUM_INSTANCES=$(ls "$INSTANCE_DIR" | grep -cE '\.mps(\.gz)?$')
 if [ "$NUM_INSTANCES" -eq 0 ]; then
@@ -15,16 +15,17 @@ echo "Found $NUM_INSTANCES instances in $INSTANCE_DIR"
 NORM="manhattan"
 VARIANT="vanilla"
 LS="unitary"
-NAME="run_base"
 
-OUT_DIR="$PROJECT_DIR/$NAME/output"
-ERR_DIR="$PROJECT_DIR/$NAME/error"
+FOLDER="base"
+
+OUT_DIR="$PROJECT_DIR/$FOLDER/output"
+ERR_DIR="$PROJECT_DIR/$FOLDER/error"
 rm -rf "$OUT_DIR" "$ERR_DIR"
 mkdir -p "$OUT_DIR" "$ERR_DIR"
 
-sbatch <<EOF || { echo "ERROR: sbatch failed for $NAME"; exit 1; }
+sbatch <<EOF || { echo "ERROR: sbatch failed for $FOLDER"; exit 1; }
 #!/bin/bash
-#SBATCH --job-name=fpfw_${NAME}
+#SBATCH --job-name=fpfw_${FOLDER}
 #SBATCH --time=20:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -54,4 +55,4 @@ echo "SLURM task ID: \${SLURM_ARRAY_TASK_ID}"
 julia --project=$PROJECT_DIR $PROJECT_DIR/run_test.jl "\$INSTANCE_PATH" $NORM $VARIANT $LS
 EOF
 
-echo "Submitted: $NAME (${NUM_INSTANCES} instances)"
+echo "Submitted: $FOLDER (${NUM_INSTANCES} instances)"

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Check results for base FP-FW variant: manhattan + vanilla + unitary
+# Check results for base FP-FW variant: manhattan + vanilla + unitary + binary
 
 BASE_DIR="/home/htc/aleoputra/project/FPmeetsFW"
 
@@ -10,42 +10,43 @@ DEF_SCIP_TIME_LIMIT=$(grep 'const DEF_SCIP_TIME_LIMIT' "$BASE_DIR/dependencies.j
 NORM="manhattan"
 VARIANT="vanilla"
 LS="unitary"
-NAME="run_base"
 
-OUTPUT_DIR="$BASE_DIR/$NAME/output"
-RESULT_DIR="$BASE_DIR/$NAME/result"
+FOLDER="base"
+NAME="${NORM}_${VARIANT}_${LS}"
+
+OUTPUT_DIR="$BASE_DIR/$FOLDER/output"
+RESULT_DIR="$BASE_DIR/$FOLDER/result"
 rm -rf "$RESULT_DIR"
 mkdir -p "$RESULT_DIR"
 
-SUMMARY_FILE="$RESULT_DIR/solution_summary.txt"
-DETAILED_FILE="$RESULT_DIR/detailed_results.txt"
-FOUND_FILE="$RESULT_DIR/solutions_found.txt"
-FAILED_FILE="$RESULT_DIR/failed_runs.txt"
-CSV_FILE="$RESULT_DIR/results.csv"
+SUMMARY="$RESULT_DIR/solution_summary.txt"
+DETAILED="$RESULT_DIR/detailed_results.txt"
+FOUND="$RESULT_DIR/solutions_found.txt"
+FAILED="$RESULT_DIR/failed_runs.txt"
 
 CSV_HEADER="Instance,BinaryVars,IntegerVars,SolutionFound,TotalTime,FPIterations,FWIterations,Restarts,Objective,Gap,FailureReason,FailureType,ProjectionNorm,FWVariant,LineSearch,RandRound,RandFeasCheck,WarmStart"
 echo "$CSV_HEADER" > "$CSV_FILE"
 
-echo "FPFW Solution Analysis [$NAME] - $(date)" > "$SUMMARY_FILE"
-echo "==========================================================" >> "$SUMMARY_FILE"
+echo "FPFW Solution Analysis [$NAME] - $(date)" > "$SUMMARY"
+echo "==========================================================" >> "$SUMMARY"
 
-echo "DETAILED RESULTS" > "$DETAILED_FILE"
-echo "==========================================================" >> "$DETAILED_FILE"
-echo "  Projection norm:    $NORM" >> "$DETAILED_FILE"
-echo "  FW variant:         $VARIANT" >> "$DETAILED_FILE"
-echo "  Line search:        $LS" >> "$DETAILED_FILE"
-echo "==========================================================" >> "$DETAILED_FILE"
-echo "" >> "$DETAILED_FILE"
+echo "DETAILED RESULTS" > "$DETAILED"
+echo "==========================================================" >> "$DETAILED"
+echo "  Projection norm:    $NORM" >> "$DETAILED"
+echo "  FW variant:         $VARIANT" >> "$DETAILED"
+echo "  Line search:        $LS" >> "$DETAILED"
+echo "==========================================================" >> "$DETAILED"
+echo "" >> "$DETAILED"
 
-echo "Test cases with solutions found:" > "$FOUND_FILE"
-echo "=============================================================================================================================" >> "$FOUND_FILE"
-printf "%-25s %-6s %-6s %-12s %-10s %-10s %-10s %-12s %-8s\n" "Instance" "Bin" "Int" "Time (s)" "FP Iters" "FW Iters" "Restarts" "Objective" "Gap (%)" >> "$FOUND_FILE"
-echo "=============================================================================================================================" >> "$FOUND_FILE"
+echo "Test cases with solutions found:" > "$FOUND"
+echo "=============================================================================================================================" >> "$FOUND"
+printf "%-35s %-8s %-8s %-12s %-10s %-10s %-10s %-20s %-10s\n" "Instance" "Bin" "Int" "Time (s)" "FP Iters" "FW Iters" "Restarts" "Objective" "Gap (%)" >> "$FOUND"
+echo "=============================================================================================================================" >> "$FOUND"
 
-echo "Failed/Interrupted runs:" > "$FAILED_FILE"
-echo "===============================================================================================================================" >> "$FAILED_FILE"
-printf "%-25s %-6s %-6s %-15s %-50s\n" "Instance" "Bin" "Int" "Runtime (s)" "Failure Reason" >> "$FAILED_FILE"
-echo "===============================================================================================================================" >> "$FAILED_FILE"
+echo "Failed/Interrupted runs:" > "$FAILED"
+echo "===============================================================================================================================" >> "$FAILED"
+printf "%-35s %-8s %-8s %-15s %-50s\n" "Instance" "Bin" "Int" "Runtime (s)" "Failure Reason" >> "$FAILED"
+echo "===============================================================================================================================" >> "$FAILED"
 
 total_count=0
 found_count=0
@@ -128,14 +129,14 @@ for output_file in "$OUTPUT_DIR"/*.out; do
         failure_type="SCIP_TIMELIMIT"
         failed_count=$((failed_count + 1))
         scip_timelimit_count=$((scip_timelimit_count + 1))
-        printf "%-25s %-6s %-6s %-15s %-50s\n" "$instance_name" "$binary_vars" "${integer_vars:-0}" "${total_time:-N/A}" "SCIP time limit (${DEF_SCIP_TIME_LIMIT}s)" >> "$FAILED_FILE"
+        printf "%-35s %-8s %-8s %-15s %-50s\n" "$instance_name" "$binary_vars" "${integer_vars:-0}" "${total_time:-N/A}" "SCIP time limit (${DEF_SCIP_TIME_LIMIT}s)" >> "$FAILED"
 
     elif [ -n "$global_timelimit" ]; then
         failure_reason="GLOBAL_TIME_LIMIT (${DEF_GLOBAL_TIME_LIMIT}s)"
         failure_type="GLOBAL_TIMELIMIT"
         failed_count=$((failed_count + 1))
         global_timelimit_count=$((global_timelimit_count + 1))
-        printf "%-25s %-6s %-6s %-15s %-50s\n" "$instance_name" "$binary_vars" "${integer_vars:-0}" "${total_time:-N/A}" "Global time limit (${DEF_GLOBAL_TIME_LIMIT}s)" >> "$FAILED_FILE"
+        printf "%-35s %-8s %-8s %-15s %-50s\n" "$instance_name" "$binary_vars" "${integer_vars:-0}" "${total_time:-N/A}" "Global time limit (${DEF_GLOBAL_TIME_LIMIT}s)" >> "$FAILED"
 
     elif [ "$solution_found" = "true" ]; then
         found_count=$((found_count + 1))
@@ -145,29 +146,30 @@ for output_file in "$OUTPUT_DIR"/*.out; do
         found_fw_iters+=("$fw_iterations")
         found_fp_iters+=("$fp_iterations")
         found_restarts+=("$restarts")
-        printf "%-25s %-6s %-6s %-12s %-10s %-10s %-10s %-12s %-8s\n" \
-            "$instance_name" "$binary_vars" "${integer_vars:-0}" "$total_time" "$fp_iterations" "$fw_iterations" "$restarts" "$objective" "$gap" >> "$FOUND_FILE"
+        printf "%-35s %-8s %-8s %-12s %-10s %-10s %-10s %-12s %-8s\n" \
+            "$instance_name" "$binary_vars" "${integer_vars:-0}" "$total_time" "$fp_iterations" "$fw_iterations" "$restarts" "$objective" "$gap" >> "$FOUND
+        "
 
     elif [ -n "$fw_infeasible" ]; then
         failure_reason="FW_INFEASIBLE"
         failure_type="FW_INFEASIBLE"
         failed_count=$((failed_count + 1))
         fw_infeasible_count=$((fw_infeasible_count + 1))
-        printf "%-25s %-6s %-6s %-15s %-50s\n" "$instance_name" "$binary_vars" "${integer_vars:-0}" "${total_time:-N/A}" "FW returns infeasible solution" >> "$FAILED_FILE"
+        printf "%-35s %-8s %-8s %-15s %-50s\n" "$instance_name" "$binary_vars" "${integer_vars:-0}" "${total_time:-N/A}" "FW returns infeasible solution" >> "$FAILED"
 
     elif [ -n "$restart_limit" ]; then
         failure_reason="RESTART_LIMIT"
         failure_type="RESTART_LIMIT"
         failed_count=$((failed_count + 1))
         restart_limit_count=$((restart_limit_count + 1))
-        printf "%-25s %-6s %-6s %-15s %-50s\n" "$instance_name" "$binary_vars" "${integer_vars:-0}" "${total_time:-N/A}" "Maximum restarts reached" >> "$FAILED_FILE"
+        printf "%-35s %-8s %-8s %-15s %-50s\n" "$instance_name" "$binary_vars" "${integer_vars:-0}" "${total_time:-N/A}" "Maximum restarts reached" >> "$FAILED"
 
     else
         failure_reason="UNKNOWN_ERROR"
         failure_type="UNKNOWN"
         failed_count=$((failed_count + 1))
         other_failure_count=$((other_failure_count + 1))
-        printf "%-25s %-6s %-6s %-15s %-50s\n" "$instance_name" "$binary_vars" "${integer_vars:-0}" "${total_time:-N/A}" "Unknown error" >> "$FAILED_FILE"
+        printf "%-35s %-8s %-8s %-15s %-50s\n" "$instance_name" "$binary_vars" "${integer_vars:-0}" "${total_time:-N/A}" "Unknown error" >> "$FAILED"
     fi
 
     if [ "${integer_vars:-0}" -gt 0 ] 2>/dev/null; then
@@ -178,22 +180,22 @@ for output_file in "$OUTPUT_DIR"/*.out; do
 
     echo "${instance_name},${binary_vars},${integer_vars},${solution_found},${total_time},${fp_iterations},${fw_iterations},${restarts},${objective},${gap},${failure_reason},${failure_type},${projection_norm},${fw_variant},${line_search},${rand_round},${rand_feas_check},${warm_start}" >> "$CSV_FILE"
 
-    echo "Instance: ${instance_name}" >> "$DETAILED_FILE"
-    echo "  Binary variables:  ${binary_vars}" >> "$DETAILED_FILE"
-    echo "  Integer variables: ${integer_vars}" >> "$DETAILED_FILE"
-    echo "  Solution found:    ${solution_found}" >> "$DETAILED_FILE"
-    echo "  Total time:        ${total_time}s" >> "$DETAILED_FILE"
-    echo "  FP iterations:     ${fp_iterations}" >> "$DETAILED_FILE"
-    echo "  FW iterations:     ${fw_iterations}" >> "$DETAILED_FILE"
-    echo "  FW time:           ${fw_time}s" >> "$DETAILED_FILE"
-    echo "  Restarts:          ${restarts}" >> "$DETAILED_FILE"
+    echo "Instance: ${instance_name}" >> "$DETAILED"
+    echo "  Binary variables:  ${binary_vars}" >> "$DETAILED"
+    echo "  Integer variables: ${integer_vars}" >> "$DETAILED"
+    echo "  Solution found:    ${solution_found}" >> "$DETAILED"
+    echo "  Total time:        ${total_time}s" >> "$DETAILED"
+    echo "  FP iterations:     ${fp_iterations}" >> "$DETAILED"
+    echo "  FW iterations:     ${fw_iterations}" >> "$DETAILED"
+    echo "  FW time:           ${fw_time}s" >> "$DETAILED"
+    echo "  Restarts:          ${restarts}" >> "$DETAILED"
     if [ "$solution_found" = "true" ]; then
-        echo "  Objective:         ${objective}" >> "$DETAILED_FILE"
-        echo "  Gap:               ${gap}%" >> "$DETAILED_FILE"
+        echo "  Objective:         ${objective}" >> "$DETAILED"
+        echo "  Gap:               ${gap}%" >> "$DETAILED"
     else
-        echo "  Failure reason:    ${failure_reason}" >> "$DETAILED_FILE"
+        echo "  Failure reason:    ${failure_reason}" >> "$DETAILED"
     fi
-    echo "" >> "$DETAILED_FILE"
+    echo "" >> "$DETAILED"
 done
 
 if [ ${#found_times[@]} -gt 0 ]; then
@@ -247,7 +249,7 @@ if [ ${#found_times[@]} -gt 0 ]; then
     echo "Average FW iterations: $avg_fw"
     echo "Average restarts:      $avg_restarts"
 fi
-} | tee -a "$SUMMARY_FILE"
+} | tee -a "$SUMMARY"
 
 echo ""
 echo "Results saved to $RESULT_DIR"
