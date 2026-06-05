@@ -252,9 +252,20 @@ function SCIP.find_primal_solution(
                     break
                 end
 
+                if DEBUG_VERBOSE
+                    println("Cycle detected at iteration $(stats.pumpIterations) (restart #$(stats.restartCount))")
+                    println("Perturbing:")
+                end
+
                 Random.seed!(DEF_RANDOM_SEED + stats.restartCount)
                 perturbSolution!(x, xRound, binIdx, gIntIdx, lpCols)
                 h = hashSolution(xRound, intIdx)
+
+                if DEBUG_VERBOSE
+                    for i in intIdx
+                        @printf("  x[%d]: %.3f -> %d\n", i, x[i], Int(xRound[i]))
+                    end
+                end
             end
             push!(visitedRounded, h)
         end
