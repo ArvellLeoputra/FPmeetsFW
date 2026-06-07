@@ -5,9 +5,12 @@
 .vscode/
 
 # Personal files
+structure.md
 testcase/
-benchmark_full/
+miplib_binary/
+miplib_full/
 selection_benchmark/
+slurm_script/
 
 # Julia
 Manifest.toml
