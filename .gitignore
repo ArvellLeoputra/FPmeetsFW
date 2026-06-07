@@ -6,10 +6,8 @@
 
 # Personal files
 structure.md
-testcase/
 miplib_binary/
 miplib_full/
-selection_benchmark/
 slurm_script/
 
 # Julia
