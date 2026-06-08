@@ -31,7 +31,7 @@ until x is integral or time limit / max iterations
 
 - **Four FW variants**: `vanilla`, `away`, `blended_pairwise`, `blended`
 
-- **Four line search strategies**: `unitary`, `agnostic`, `backtracking`, `secant`, `adaptive`
+- **Five line search strategies**: `unitary`, `agnostic`, `backtracking`, `secant`, `adaptive`
 
 - **Cycle detection**:
   - *Rounding cycle*: same rounded solution visited again → perturb rounding target
@@ -41,37 +41,45 @@ until x is integral or time limit / max iterations
 ## Usage
 
 ```bash
-julia --project run_test.jl <instance.mps> [euclidean|manhattan|smoothManhattan] [vanilla|away|blended_pairwise|blended] [unitary|agnostic|backtracking|secant|adaptive]
+julia --project run_test.jl <fileName.mps> [key=value ...]
 ```
 
-All arguments after `instance.mps` are optional and fall back to the defaults in `dependencies.jl`.
+All arguments are optional and fall back to `fpfw.cfg`, then to defaults in `dependencies.jl`.
 
 Examples:
 ```bash
 julia --project run_test.jl ./testcase/test1.mps
-julia --project run_test.jl ./testcase/test1.mps euclidean away adaptive
+julia --project run_test.jl ./testcase/test1.mps norm=euclidean seed=123
 ```
 
-## Parameters
+## Configuration
 
-Configurable in `dependencies.jl`:
+Settings are loaded in priority order: **command-line args > `fpfw.cfg` > `dependencies.jl` defaults**
+
+`fpfw.cfg` (run configuration):
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `norm` | `manhattan` | Projection norm (`euclidean`, `manhattan`, `smoothManhattan`) |
+| `fwVariant` | `vanilla` | FW variant (`vanilla`, `away`, `blended_pairwise`, `blended`) |
+| `fwLineSearch` | `unitary` | Line search (`unitary`, `agnostic`, `backtracking`, `secant`, `adaptive`) |
+| `randomizedRounding` | `false` | Randomized rounding threshold |
+| `randomFeasibilityCheck` | `false` | Randomized feasibility check |
+| `warmStart` | `true` | Warm-start FW active set across FP iterations |
+| `presolve` | `false` | Enable SCIP presolving |
+| `seed` | `42` | Random seed for reproducibility |
+
+`dependencies.jl` (algorithm constants):
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `DEF_FW_MAX_ITER` | 1000 | Max Frank-Wolfe iterations per FP projection step |
-| `DEF_GLOBAL_TIME_LIMIT` | 480s | Total wall-clock time limit for the heuristic |
-| `DEF_SCIP_TIME_LIMIT` | 300s | SCIP solver time limit (for root LP solve) |
-| `DEF_TOLERANCE` | 1e-6 | Tolerance for feasibility/integrality checks |
-| `DEF_FW_TOLERANCE` | 1e-7 | FW convergence tolerance (duality gap) |
-| `DEF_PERTURB_FRACTION` | 0.2 | Fraction of binary vars to flip on cycle restart |
-| `DEF_MAX_RESTARTS` | 1000 | Max restarts after cycle detection |
-| `DEF_ROUNDING_THRESHOLD` | 0.5 | Threshold for rounding fractional values to 1 |
-| `DEF_FW_VARIANT` | `:away` | FW variant (`:vanilla`, `:away`, `:blended_pairwise`, `:blended`) |
-| `DEF_LINE_SEARCH` | `:adaptive` | Line search (`:agnostic`, `:backtracking`, `:secant`, `:adaptive`) |
-| `DEF_RAND_ROUND` | `true` | Enable randomized rounding before each FP iteration |
-| `DEF_WARM_START` | `true` | Warm-start FW active set across FP iterations |
-| `DEF_RANDOM_SEED` | `42` | Random seed for reproducibility (`nothing` to disable) |
-| `DEF_PRESOLVE` | `false` | Whether to enable SCIP presolving before the heuristic |
+| `DEF_FW_MAX_ITER` | `1` | Max Frank-Wolfe iterations per FP projection step |
+| `DEF_GLOBAL_TIME_LIMIT` | `480s` | Total wall-clock time limit |
+| `DEF_SCIP_TIME_LIMIT` | `300s` | SCIP solver time limit (for root LP solve) |
+| `DEF_INT_TOLERANCE` | `1e-6` | Tolerance for feasibility/integrality checks |
+| `DEF_FW_TOLERANCE` | `1e-7` | FW convergence tolerance (duality gap) |
+| `DEF_PERTURB_FRACTION` | `0.2` | Fraction of binary vars to flip on cycle restart |
+| `DEF_MAX_RESTARTS` | `1000` | Max restarts after cycle detection |
 | `DEBUG_VERBOSE` | `false` | Print detailed per-iteration output |
 
 ## Dependencies
@@ -84,16 +92,11 @@ Configurable in `dependencies.jl`:
 
 ```
 ├── run_test.jl          # Entry point (single run)
+├── fpfw.cfg             # Run configuration
 ├── dependencies.jl      # Parameters and type definitions
 ├── fpfwheur.jl          # Main FPFW heuristic implementation
 ├── lmo_builder.jl       # Builds Linear Minimization Oracle from SCIP LP
+├── fw_utils.jl          # Frank-Wolfe utility functions
 ├── helper.jl            # Utility functions
-├── scip_setup.jl        # SCIP configuration
-└── slurm_script/
-    ├── submit_all.sh    # Submit all 23 norm/variant/linesearch combinations
-    ├── submit_selected.sh  # Submit 8 curated combinations
-    ├── submit_focused.sh   # Submit euclidean+away+adaptive with RR/WS ablation
-    ├── check_all.sh     # Parse and summarize results from submit_all
-    ├── check_selected.sh   # Parse and summarize results from submit_selected
-    └── check_focused.sh    # Parse and summarize results from submit_focused
+└── scip_setup.jl        # SCIP configuration
 ```

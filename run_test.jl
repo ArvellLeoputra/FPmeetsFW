@@ -6,7 +6,8 @@ include("lmo_builder.jl")
 include("fw_utils.jl")
 
 function mps_test_model(fileName::String, config::FPFWConfig, globalStartTime::Float64)
-    model = minimal_setup(presolve=DEF_PRESOLVE)
+    Random.seed!(config.seed)
+    model = minimal_setup(presolve=config.presolve)
     backend = JuMP.unsafe_backend(model)
     scip = backend.inner
 
@@ -25,15 +26,16 @@ function mps_test_model(fileName::String, config::FPFWConfig, globalStartTime::F
     println("binaryVars = $binaryCount")
     println("integerVars = $integerCount")
     println("continuousVars = $continuousCount")
-    println("presolve = $(DEF_PRESOLVE ? "enabled" : "disabled")")
+    println("presolve = $(config.presolve ? "enabled" : "disabled")")
 
     printstyled("[FPFW configs]\n", color=:cyan)
-    println("projectionNorm = $(config.projNorm)")
+    println("norm = $(config.norm)")
     println("fwVariant = $(config.fwVariant)")
     println("lineSearch = $(config.lineSearch)")
     println("randomizedRounding = $(config.randRound ? "enabled" : "disabled")")
     println("randomizedFeasibilityCheck = $(config.randFeasCheck ? "enabled" : "disabled")")
     println("warmStart = $(config.warmStart ? "enabled" : "disabled")")
+    println("seed = $(config.seed)")
 
     heur = FPFWHeuristic(
         0,
@@ -66,7 +68,7 @@ function mps_test_model(fileName::String, config::FPFWConfig, globalStartTime::F
 end
 
 if length(ARGS) < 1
-    error("Usage: julia --project run_test.jl <fileName.mps> [euclidean|manhattan|smoothManhattan] [vanilla|away|blended_pairwise|blended] [agnostic|backtracking|secant|adaptive]")
+    error("Usage: julia --project run_test.jl <fileName.mps> [norm=] [fwVariant=] [fwLineSearch=] [randomizedRounding=] [randomFeasibilityCheck=] [warmStart=] [presolve=] [seed=]")
 end
 
 fileName = ARGS[1]
@@ -75,36 +77,56 @@ if !isfile(fileName)
     error("File not found: $fileName")
 end
 
-projectionNorm = length(ARGS) >= 2 ? Symbol(ARGS[2]) : :manhattan
+kwargs = Dict{String, String}()
 
-validNorms = (:euclidean, :manhattan, :smoothManhattan)
-if projectionNorm ∉ validNorms
-    error("Invalid projection norm: $projNorm. Must be one of: $validNorms")
+# Load fpfw.cfg as defaults if it exists
+if isfile("fpfw.cfg")
+    for line in readlines("fpfw.cfg")
+        line = strip(line)
+        if !isempty(line) && !startswith(line, "#") && contains(line, "=")
+            key, value = split(line, "=", limit=2)
+            kwargs[key] = value
+        end
+    end
 end
 
-fwVariant = length(ARGS) >= 3 ? Symbol(ARGS[3]) : DEF_FW_VARIANT
+# Command-line args override cfg values
+for arg in ARGS[2:end]
+    if contains(arg, "=")
+        key, value = split(arg, "=")
+        kwargs[key] = value
+    end
+end
 
+norm = Symbol(get(kwargs, "norm", string(DEF_NORM)))
+validNorms = (:euclidean, :manhattan, :smoothManhattan)
+if norm ∉ validNorms
+    error("Invalid norm: $norm. Must be one of: $validNorms")
+end
+
+fwVariant = Symbol(get(kwargs, "fwVariant", string(DEF_FW_VARIANT)))
 validVariants = (:vanilla, :away, :blended_pairwise, :blended)
 if fwVariant ∉ validVariants
-    error("Invalid FW variant: $fwVariant. Must be one of: $validVariants")
+    error("Invalid fwVariant: $fwVariant. Must be one of: $validVariants")
 end
 
-lineSearch = length(ARGS) >= 4 ? Symbol(ARGS[4]) : DEF_LINE_SEARCH
-
+lineSearch = Symbol(get(kwargs, "fwLineSearch", string(DEF_LINE_SEARCH)))
 validLineSearches = (:agnostic, :backtracking, :secant, :adaptive, :unitary)
 if lineSearch ∉ validLineSearches
-    error("Invalid line search: $lineSearch. Must be one of: $validLineSearches")
+    error("Invalid fwLineSearch: $lineSearch. Must be one of: $validLineSearches")
 end
 
-if projectionNorm == :manhattan && lineSearch ∈ (:adaptive, :secant)
-    error("manhattan norm requires a smooth objective — use agnostic or backtracking line search instead")
+if norm == :manhattan && lineSearch ∈ (:adaptive, :secant)
+    error("manhattan norm requires a smooth objective — use agnostic or backtracking instead")
 end
 
-config = FPFWConfig(projectionNorm, fwVariant, lineSearch, DEF_RAND_ROUND, DEF_RAND_FEAS_CHECK, DEF_WARM_START)
+randRound = parse(Bool, get(kwargs, "randomizedRounding", string(DEF_RAND_ROUND)))
+randFeasCheck = parse(Bool, get(kwargs, "randomFeasibilityCheck", string(DEF_RAND_FEAS_CHECK)))
+warmStart = parse(Bool, get(kwargs, "warmStart", string(DEF_WARM_START)))
+presolve = parse(Bool, get(kwargs, "presolve", string(DEF_PRESOLVE)))
+seed = parse(Int, get(kwargs, "seed", string(DEF_RANDOM_SEED)))
+
+config = FPFWConfig(norm, fwVariant, lineSearch, randRound, randFeasCheck, warmStart, presolve, seed)
 startTime = time()
-
-if DEF_RANDOM_SEED !== nothing
-    Random.seed!(DEF_RANDOM_SEED)
-end
 
 mps_test_model(fileName, config, startTime)

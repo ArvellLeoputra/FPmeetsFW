@@ -78,7 +78,7 @@ function SCIP.find_primal_solution(
     # TODO: store the best solution found across iterations, not just the first one
     foundSolution = nothing
 
-    f, grad! = buildFWFunctions(heur.config.projNorm, intIdx)
+    f, grad! = buildFWFunctions(heur.config.norm, intIdx)
     ls = buildLineSearch(heur.config.lineSearch)
 
     # FW step trajectory within one FP iteration: (step, x, objective)

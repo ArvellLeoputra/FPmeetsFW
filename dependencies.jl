@@ -8,12 +8,14 @@ import MathOptInterface
 const MOI = MathOptInterface
 
 struct FPFWConfig
-    projNorm::Symbol
+    norm::Symbol
     fwVariant::Symbol
     lineSearch::Symbol
     randRound::Bool
     randFeasCheck::Bool
     warmStart::Bool
+    presolve::Bool
+    seed::Int
 end
 
 mutable struct FPFWHeuristic <: SCIP.Heuristic
@@ -71,8 +73,8 @@ const DEF_MAX_RESTARTS = 1000      # Maximum number of restarts before giving up
 const DEF_BIGM = 1e9               # Big M constant for cycle-breaking perturbations
 const DEF_BIGBIGM = 1e15           # Bigbig M constant for perturbations
 
-# Random seed for reproducibility; set to nothing to disable
-const DEF_RANDOM_SEED::Union{Nothing, Int} = 42
+# Random seed for reproducibility
+const DEF_RANDOM_SEED = 42
 
 # Randomized rounding
 const DEF_RAND_ROUND = false
@@ -83,6 +85,9 @@ const DEF_RAND_FEAS_ITER_LIMIT = 100
 
 # Warm-starting away/blended variants with the previous iteration's active set
 const DEF_WARM_START = true
+
+# Projection norm: :euclidean, :manhattan, :smoothManhattan
+const DEF_NORM = :manhattan
 
 # Frank-Wolfe variant: :vanilla, :away, :blended_pairwise, :blended
 const DEF_FW_VARIANT = :vanilla
