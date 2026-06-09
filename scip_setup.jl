@@ -113,8 +113,6 @@ function set_verbosity!(model::JuMP.Model, level::Int)
 end
 
 function minimal_setup(;
-    time_limit=DEF_SCIP_TIME_LIMIT,
-    node_limit=1,
     verbosity=0,
     presolve=false
 )
@@ -129,7 +127,41 @@ function minimal_setup(;
     end
 
     set_verbosity!(model, verbosity)
-    set_limits!(model, time_limit=time_limit, node_limit=node_limit)
 
     return model
+end
+
+function presolve_and_clone(backend, lpData::LPData)::Bool
+    heur = LPCloneHeuristic(lpData, false)
+    SCIP.include_heuristic(
+        backend,
+        heur,
+        name="LPClone",
+        priority=9999,
+        timing_mask=SCIP.SCIP_HEURTIMING_DURINGLPLOOP
+    )
+
+    scip = backend.inner.scip[]
+    SCIP.SCIPsetLongintParam(scip, "limits/nodes", 1)
+    SCIP.SCIPsolve(scip)
+    return !heur.cloned
+end
+
+function SCIP.find_primal_solution(
+    scip::Ptr{SCIP.SCIP_},
+    heur::LPCloneHeuristic,
+    heurtiming::SCIP.SCIP_HEURTIMING,
+    nodeinfeasible::Bool,
+    heur_ptr::Ptr{SCIP.SCIP_HEUR},
+)::Tuple{SCIP.SCIP_RETCODE, SCIP.SCIP_RESULT}
+
+    if heur.cloned
+        return (SCIP.SCIP_OKAY, SCIP.SCIP_DIDNOTRUN)
+    end
+
+    getLPData(scip, heur.lpData)
+    heur.lpData.lmo = build_lmo_from_scip_lp(scip, heur.lpData.nvars, heur.lpData.nrows)
+    heur.cloned = true
+
+    return (SCIP.SCIP_OKAY, SCIP.SCIP_DIDNOTRUN)
 end

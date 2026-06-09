@@ -9,62 +9,51 @@ function mps_test_model(fileName::String, config::FPFWConfig, globalStartTime::F
     Random.seed!(config.seed)
     model = minimal_setup(presolve=config.presolve)
     backend = JuMP.unsafe_backend(model)
-    scip = backend.inner
+    scip = backend.inner.scip[]
 
-    SCIP.SCIPreadProb(scip, fileName, C_NULL)
+    GC.@preserve model begin
+        SCIP.SCIPreadProb(scip, fileName, C_NULL)
 
-    # Count original binary variables from MPS before any solving/presolving
-    variableCount = SCIP.SCIPgetNOrigVars(scip)
-    originalVars = unsafe_wrap(Vector{Ptr{SCIP.SCIP_VAR}}, SCIP.SCIPgetOrigVars(scip), variableCount)
-    binaryCount = sum(SCIP.SCIPvarGetType(originalVars[j]) == SCIP.SCIP_VARTYPE_BINARY for j in 1:variableCount)
-    integerCount = sum(SCIP.SCIPvarGetType(originalVars[j]) == SCIP.SCIP_VARTYPE_INTEGER for j in 1:variableCount)
-    continuousCount = variableCount - binaryCount - integerCount
+        # Count original binary variables from MPS before any solving/presolving
+        variableCount = SCIP.SCIPgetNOrigVars(scip)
+        originalVars = unsafe_wrap(Vector{Ptr{SCIP.SCIP_VAR}}, SCIP.SCIPgetOrigVars(scip), variableCount)
+        binaryCount = sum(SCIP.SCIPvarGetType(originalVars[j]) == SCIP.SCIP_VARTYPE_BINARY for j in 1:variableCount)
+        integerCount = sum(SCIP.SCIPvarGetType(originalVars[j]) == SCIP.SCIP_VARTYPE_INTEGER for j in 1:variableCount)
+        continuousCount = variableCount - binaryCount - integerCount
 
-    printstyled("[run info]\n", color=:cyan)
-    println("instance = $(splitext(basename(fileName))[1])")
-    println("totalVars = $variableCount")
-    println("binaryVars = $binaryCount")
-    println("integerVars = $integerCount")
-    println("continuousVars = $continuousCount")
-    println("presolve = $(config.presolve ? "enabled" : "disabled")")
+        printstyled("[run info]\n", color=:cyan)
+        println("instance = $(splitext(basename(fileName))[1])")
+        println("totalVars = $variableCount")
+        println("binaryVars = $binaryCount")
+        println("integerVars = $integerCount")
+        println("continuousVars = $continuousCount")
+        println("presolve = $(config.presolve ? "enabled" : "disabled")")
 
-    printstyled("[FPFW configs]\n", color=:cyan)
-    println("norm = $(config.norm)")
-    println("fwVariant = $(config.fwVariant)")
-    println("lineSearch = $(config.lineSearch)")
-    println("randomizedRounding = $(config.randRound ? "enabled" : "disabled")")
-    println("randomizedFeasibilityCheck = $(config.randFeasCheck ? "enabled" : "disabled")")
-    println("warmStart = $(config.warmStart ? "enabled" : "disabled")")
-    println("seed = $(config.seed)")
+        printstyled("[FPFW configs]\n", color=:cyan)
+        println("norm = $(config.norm)")
+        println("fwVariant = $(config.fwVariant)")
+        println("lineSearch = $(config.lineSearch)")
+        println("randomizedRounding = $(config.randRound ? "enabled" : "disabled")")
+        println("randomizedFeasibilityCheck = $(config.randFeasCheck ? "enabled" : "disabled")")
+        println("warmStart = $(config.warmStart ? "enabled" : "disabled")")
+        println("seed = $(config.seed)")
 
-    heur = FPFWHeuristic(
-        0,
-        nothing,
-        config,
-        globalStartTime
-    )
+        lpData = LPData(0, 0, Ptr{SCIP.SCIP_COL}[], Ptr{SCIP.SCIP_ROW}[], Dict{Ptr{SCIP.SCIP_COL}, Int}(), Int[], Int[], Int[], Float64[], nothing)
+        solved = presolve_and_clone(backend, lpData)
 
-    SCIP.include_heuristic(
-        backend,
-        heur,
-        name="FPFWHeuristic",
-        priority=9999,
-        timing_mask=SCIP.SCIP_HEURTIMING_DURINGLPLOOP
-    )
+        if solved
+            stats = FPFWStats()
+            stats.totalTime = time() - globalStartTime
+            stats.primalBound = SCIP.SCIPgetNSols(scip) > 0 ? Float64(SCIP.SCIPgetPrimalbound(scip)) : nothing
+            stats.gap = Float64(SCIP.SCIPgetGap(scip))
+            stats.solutionFound = SCIP.SCIPgetNSols(scip) > 0
+            stats.exitReason = :scip_presolved
+            printHeurSummary(stats)
+            return nothing
+        end
 
-    SCIP.SCIPsolve(scip)
-
-    if heur.called == 0
-        stats = FPFWStats()
-        stats.totalTime = time() - globalStartTime
-        stats.primalBound = SCIP.SCIPgetNSols(scip) > 0 ? Float64(SCIP.SCIPgetPrimalbound(scip)) : nothing
-        stats.gap = Float64(SCIP.SCIPgetGap(scip))
-        stats.solutionFound = SCIP.SCIPgetNSols(scip) > 0                                                                                                                                                                         
-        stats.exitReason = stats.solutionFound ? :scip_solved : :scip_time_limit                                                                                                                                                
-        printHeurSummary(stats)
+        runFPFW(scip, lpData, config, globalStartTime)
     end
-
-    return nothing
 end
 
 if length(ARGS) < 1

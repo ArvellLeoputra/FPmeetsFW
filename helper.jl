@@ -11,10 +11,8 @@ function printHeurSummary(stats::FPFWStats)
         "integer feasible solution found by randomized rounding at iteration $(stats.pumpIterations)"
     elseif stats.exitReason == :solution_rejected
         "integer feasible solution found but rejected by SCIP"
-    elseif stats.exitReason == :scip_time_limit
-        "SCIP time limit $(DEF_SCIP_TIME_LIMIT)s exceeded, heuristic never called"
-    elseif stats.exitReason == :scip_solved                                                                                                                                                                                          
-        "problem solved by SCIP presolve/LP before heuristic was called"
+    elseif stats.exitReason == :scip_presolved
+        "problem solved by SCIP during presolve"
     else
         "unknown exit"
     end
@@ -86,29 +84,30 @@ function countFracVars(intIdx::Vector{Int},x::Vector{Float64}, tol::Float64=DEF_
     return cnt
 end
 
-function getLPData(scip::Ptr{SCIP.SCIP_}, nvars::Int32, nrows::Int32,)
+function getLPData(scip::Ptr{SCIP.SCIP_}, lpData::LPData)
+    lpData.nvars = SCIP.SCIPgetNLPCols(scip)
+    lpData.nrows = SCIP.SCIPgetNLPRows(scip)
+
     colsPtr = SCIP.SCIPgetLPCols(scip)
-    lpCols = unsafe_wrap(Vector{Ptr{SCIP.SCIP_COL}}, colsPtr, nvars)
-    colDict = Dict(lpCols[k] => k for k in 1:nvars)
+    lpData.lpCols = unsafe_wrap(Vector{Ptr{SCIP.SCIP_COL}}, colsPtr, lpData.nvars)
+    lpData.colDict = Dict(lpData.lpCols[k] => k for k in 1:lpData.nvars)
 
     rowsPtr = SCIP.SCIPgetLPRows(scip)
-    lpRows = unsafe_wrap(Vector{Ptr{SCIP.SCIP_ROW}}, rowsPtr, nrows)
+    lpData.lpRows = unsafe_wrap(Vector{Ptr{SCIP.SCIP_ROW}}, rowsPtr, lpData.nrows)
 
-    binIdx = Int[]
-    intIdx = Int[]
-    initSol = zeros(SCIP.SCIP_Real, nvars)
+    lpData.initSol = zeros(SCIP.SCIP_Real, lpData.nvars)
 
-    for j in 1:nvars
-        var = SCIP.SCIPcolGetVar(lpCols[j])
-        if SCIP.SCIPvarIsBinary(var) == SCIP.TRUE
-            push!(binIdx, j)
-        elseif SCIP.SCIPvarIsIntegral(var) == SCIP.TRUE
-            push!(intIdx, j)
+    for j in 1:lpData.nvars
+        var = SCIP.SCIPcolGetVar(lpData.lpCols[j])
+        if SCIP.SCIPvarGetType(var) == SCIP.SCIP_VARTYPE_BINARY
+            push!(lpData.binIdx, j)
+        elseif SCIP.SCIPvarGetType(var) == SCIP.SCIP_VARTYPE_INTEGER
+            push!(lpData.gIntIdx, j)
         end
-        initSol[j] = SCIP.SCIPcolGetPrimsol(lpCols[j])
+        lpData.initSol[j] = SCIP.SCIPcolGetPrimsol(lpData.lpCols[j])
     end
 
-    return lpCols, lpRows, colDict, binIdx, intIdx, initSol
+    lpData.intIdx = [lpData.binIdx; lpData.gIntIdx]
 end
 
 # Rounding threshold generator
@@ -124,7 +123,6 @@ function roundSolution!(xRound::Vector{Float64}, x::Vector{Float64}, intIdx::Vec
 end
 
 # Hash function for cycle detection (only hashes integer variable values)
-# Not used currently
 function hashSolution(x::Vector{Float64}, intIdx::Vector{Int})
     hash(tuple((x[i] for i in intIdx)...))
 end
@@ -158,42 +156,60 @@ function perturbSolution!(x::Vector{Float64}, xRound::Vector{Float64}, binIdx::V
     end
 end
 
-function lpDiving!(scip::Ptr{SCIP.SCIP_}, lpCols::Vector{Ptr{SCIP.SCIP_COL}}, intIdx::Vector{Int}, xRound::Vector{Float64}, nvars::Int32)::Tuple{Bool, Vector{Float64}}
-    SCIP.SCIPstartDive(scip)
-    
-    try
-        # Fix integer variables to their rounded values
-        for i in intIdx
-            var = SCIP.SCIPcolGetVar(lpCols[i])
-            SCIP.SCIPchgVarLbDive(scip, var, xRound[i])
-            SCIP.SCIPchgVarUbDive(scip, var, xRound[i])
+function lpDiving!(scip::Ptr{SCIP.SCIP_}, lpData::LPData, xRound::Vector{Float64})::Tuple{Bool, Vector{Float64}}
+    lpModel = Model(SCIP.Optimizer)
+    set_silent(lpModel)
+
+    vars = Vector{VariableRef}(undef, lpData.nvars)
+    for j in 1:lpData.nvars
+        var = SCIP.SCIPcolGetVar(lpData.lpCols[j])
+        lb = SCIP.SCIPvarGetLbLocal(var)
+        ub = SCIP.SCIPvarGetUbLocal(var)
+        vars[j] = @variable(lpModel, lower_bound=lb, upper_bound=ub)
+    end
+
+    for i in lpData.intIdx
+        set_lower_bound(vars[i], xRound[i])
+        set_upper_bound(vars[i], xRound[i])
+    end
+
+    for row in lpData.lpRows
+        nnonz = SCIP.SCIProwGetNNonz(row)
+        nonzCols = unsafe_wrap(Vector{Ptr{SCIP.SCIP_COL}}, SCIP.SCIProwGetCols(row), nnonz)
+        nonzVals = unsafe_wrap(Vector{SCIP.SCIP_Real}, SCIP.SCIProwGetVals(row), nnonz)
+
+        constant = SCIP.SCIProwGetConstant(row)
+        lhs = SCIP.SCIProwGetLhs(row) - constant
+        rhs = SCIP.SCIProwGetRhs(row) - constant
+
+        activity = sum(nonzVals[k] * vars[lpData.colDict[nonzCols[k]]] for k in 1:nnonz)
+
+        if lhs > -SCIP.SCIPinfinity(scip) && rhs < SCIP.SCIPinfinity(scip)
+            @constraint(lpModel, lhs <= activity <= rhs)
+        elseif lhs > -SCIP.SCIPinfinity(scip)
+            @constraint(lpModel, activity >= lhs)
+        elseif rhs < SCIP.SCIPinfinity(scip)
+            @constraint(lpModel, activity <= rhs)
         end
+    end
 
-        lperror = Ref{SCIP.SCIP_Bool}(SCIP.FALSE)
-        cutoff  = Ref{SCIP.SCIP_Bool}(SCIP.FALSE)
+    @objective(lpModel, Min, sum(SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lpData.lpCols[j])) * vars[j] for j in 1:lpData.nvars))
 
-        SCIP.SCIPsolveDiveLP(scip, -1, lperror, cutoff)
+    optimize!(lpModel)
 
-        if lperror[] == SCIP.TRUE || cutoff[] == SCIP.TRUE
-            return false, Float64[]
-        end
-
-        if SCIP.SCIPgetLPSolstat(scip) == SCIP.SCIP_LPSOLSTAT_OPTIMAL
-            sol = [SCIP.SCIPcolGetPrimsol(lpCols[j]) for j in 1:nvars]
-            return true, sol
-        else
-            return false, Float64[]
-        end
-    finally
-        SCIP.SCIPendDive(scip)
+    if termination_status(lpModel) == MOI.OPTIMAL
+        sol = [value(vars[j]) for j in 1:lpData.nvars]
+        return true, sol
+    else
+        return false, Float64[]
     end
 end
 
 # Helper function to check LP feasibility
-function isSolutionLPFeasible(scip::Ptr{SCIP.SCIP_}, lpRows::Vector{Ptr{SCIP.SCIP_ROW}}, lpCols::Vector{Ptr{SCIP.SCIP_COL}}, sol::Vector{Float64}, colDict::Dict{Ptr{SCIP.SCIP_COL}, Int}, tol::Float64=DEF_INT_TOLERANCE)
+function isSolutionLPFeasible(scip::Ptr{SCIP.SCIP_}, lpData::LPData, sol::Vector{Float64}, tol::Float64=DEF_INT_TOLERANCE)
     # Check bounds
-    for j in 1:length(lpCols)
-        var = SCIP.SCIPcolGetVar(lpCols[j])
+    for j in 1:length(lpData.lpCols)
+        var = SCIP.SCIPcolGetVar(lpData.lpCols[j])
         lb = SCIP.SCIPvarGetLbLocal(var)
         ub = SCIP.SCIPvarGetUbLocal(var)
 
@@ -203,8 +219,8 @@ function isSolutionLPFeasible(scip::Ptr{SCIP.SCIP_}, lpRows::Vector{Ptr{SCIP.SCI
     end
 
     # Constraint check using rows
-    for i in 1:length(lpRows)
-        row = lpRows[i]
+    for i in 1:length(lpData.lpRows)
+        row = lpData.lpRows[i]
 
         nnonz = SCIP.SCIProwGetNNonz(row)
         nonzCols = unsafe_wrap(Vector{Ptr{SCIP.SCIP_COL}}, SCIP.SCIProwGetCols(row), nnonz)
@@ -214,7 +230,7 @@ function isSolutionLPFeasible(scip::Ptr{SCIP.SCIP_}, lpRows::Vector{Ptr{SCIP.SCI
         
         for k in 1:nnonz
             col = nonzCols[k]
-            idx = colDict[col]
+            idx = lpData.colDict[col]
             activity += nonzVals[k] * sol[idx]
         end
     
@@ -244,26 +260,6 @@ function isSolutionIntegral(sol::Vector{Float64}, intIdx::Vector{Int}, tol::Floa
     return true
 end
 
-function submitSolution(scip::Ptr{SCIP.SCIP_}, heurPtr::Ptr{SCIP.SCIP_HEUR}, lpCols::Vector{Ptr{SCIP.SCIP_COL}}, sol::Vector{Float64}, nvars::Int32)
-    solPtr = Ref{Ptr{SCIP.SCIP_SOL}}()
-    SCIP.SCIPcreateSol(scip, solPtr, heurPtr)
-    scipSol = solPtr[]
-
-    # Set solution values
-    for j in 1:nvars
-        col = lpCols[j]
-        var = SCIP.SCIPcolGetVar(col)
-        SCIP.SCIPsetSolVal(scip, scipSol, var, sol[j])
-    end
-
-    # Try to add solution
-    stored = Ref{SCIP.SCIP_Bool}()
-    SCIP.SCIPtrySol(scip, scipSol, SCIP.FALSE, SCIP.FALSE, SCIP.TRUE, SCIP.TRUE, SCIP.TRUE, stored)
-
-    if stored[] == SCIP.TRUE
-        return true
-    else
-        SCIP.SCIPfreeSol(scip, solPtr)
-        return false
-    end
+function submitSolution(scip::Ptr{SCIP.SCIP_}, lpData::LPData, sol::Vector{Float64})
+    return isSolutionIntegral(sol, lpData.intIdx) && isSolutionLPFeasible(scip, lpData, sol)
 end

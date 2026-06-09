@@ -18,13 +18,6 @@ struct FPFWConfig
     seed::Int
 end
 
-mutable struct FPFWHeuristic <: SCIP.Heuristic
-    called::Int64
-    lmo::Union{Nothing, FrankWolfe.MathOptLMO}
-    config::FPFWConfig 
-    globalStartTime::Float64
-end
-
 mutable struct FPFWStats
     primalBound::Union{Float64, Nothing}
     dualBound::Float64
@@ -37,9 +30,27 @@ mutable struct FPFWStats
     fwIterations::Int
     restartCount::Int
     solutionFound::Bool
-    exitReason::Symbol  # :none, :time_limit, :restart_limit, :infeasible_fw, :solution_found, :rr_solution_found, :solution_rejected, :scip_time_limit, :scip_solved
+    exitReason::Symbol  # :none, :time_limit, :restart_limit, :infeasible_fw, :solution_found, :rr_solution_found, :solution_rejected, :scip_iter_limit, :scip_presolved
 
     FPFWStats() = new(nothing, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, 0, false, :none)
+end
+
+mutable struct LPData
+    nvars::Int32
+    nrows::Int32
+    lpCols::Vector{Ptr{SCIP.SCIP_COL}}
+    lpRows::Vector{Ptr{SCIP.SCIP_ROW}}
+    colDict::Dict{Ptr{SCIP.SCIP_COL}, Int}
+    binIdx::Vector{Int}
+    gIntIdx::Vector{Int}
+    intIdx::Vector{Int}
+    initSol::Vector{Float64}
+    lmo
+end
+
+mutable struct LPCloneHeuristic <: SCIP.Heuristic
+    lpData::LPData
+    cloned::Bool
 end
 
 mutable struct PumpDisplayColumn
