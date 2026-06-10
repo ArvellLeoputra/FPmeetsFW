@@ -121,10 +121,6 @@ function SCIP.find_primal_solution(
             end
         end
 
-        if DEF_FW_MAX_ITER > 0 && state.t >= DEF_FW_MAX_ITER                                                                                                                                                                               
-            return false                                                                                                                                                                                                                   
-        end
-        
         return true  # continue FW iter
     end
 

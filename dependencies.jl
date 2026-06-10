@@ -57,7 +57,7 @@ const DEF_INT_TOLERANCE = 1e-6
 const DEF_FW_TOLERANCE = 1e-7
 
 # Iteration parameters
-const DEF_FW_MAX_ITER = 10
+const DEF_FW_MAX_ITER = 1
 
 # Time limit
 const DEF_GLOBAL_TIME_LIMIT = 480.0

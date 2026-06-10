@@ -91,7 +91,7 @@ end
 function run_fw(variant, f, grad!, lmo, x0, activeSet, warmStart, ls, callback, remainingTime)
     if warmStart && activeSet !== nothing && variant !== :vanilla
         callFWVariant(variant, f, grad!, lmo, activeSet,
-            max_iteration = DEF_FW_MAX_ITER,
+            max_iteration = DEF_FW_MAX_ITER - 1,
             verbose = false,
             line_search = ls,
             epsilon = DEF_FW_TOLERANCE,
@@ -100,7 +100,7 @@ function run_fw(variant, f, grad!, lmo, x0, activeSet, warmStart, ls, callback, 
         )
     else
         callFWVariant(variant, f, grad!, lmo, x0,
-            max_iteration = DEF_FW_MAX_ITER,
+            max_iteration = DEF_FW_MAX_ITER - 1,
             verbose = false,
             line_search = ls,
             epsilon = DEF_FW_TOLERANCE,
