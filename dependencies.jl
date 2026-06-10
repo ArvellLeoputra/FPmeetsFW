@@ -57,7 +57,7 @@ const DEF_INT_TOLERANCE = 1e-6
 const DEF_FW_TOLERANCE = 1e-7
 
 # Iteration parameters
-const DEF_FW_MAX_ITER = 1
+const DEF_FW_MAX_ITER = 10
 
 # Time limit
 const DEF_GLOBAL_TIME_LIMIT = 480.0
@@ -69,7 +69,7 @@ const DEF_FW_ESCAPE = false
 # Perturbation parameters
 const DEF_PERTURB_FRACTION = 0.2   # Fraction of binary vars to flip when cycle detected
 const DEF_MAX_RESTARTS = 1000      # Maximum number of restarts before giving up
-# const DEF_MAX_STAGNATION = 1       # Maximum number of iterations without improvement before perturbing
+const DEF_MAX_STAGNATION = 3       # Maximum number of iterations without improvement before perturbing
 const DEF_BIGM = 1e9               # Big M constant for cycle-breaking perturbations
 const DEF_BIGBIGM = 1e15           # Bigbig M constant for perturbations
 

@@ -79,7 +79,6 @@ function SCIP.find_primal_solution(
     foundSolution = nothing
 
     f, grad! = buildFWFunctions(heur.config.norm, intIdx)
-    ls = buildLineSearch(heur.config.lineSearch)
 
     # FW step trajectory within one FP iteration: (step, x, objective)
     fwTraj = Vector{Tuple{Int, Vector{Float64}, Float64}}()
@@ -199,38 +198,6 @@ function SCIP.find_primal_solution(
             end
         end
 
-        # if stagnationCount >= DEF_MAX_STAGNATION
-        #     stats.restartCount += 1
-
-        #     if stats.restartCount >= DEF_MAX_RESTARTS
-        #         stats.exitReason = :restart_limit
-        #         break
-        #     end
-
-        #     if DEBUG_VERBOSE
-        #         println("Cycle detected at iteration $(stats.pumpIterations) (restart #$(stats.restartCount))")
-        #         println("Perturbing:")
-        #     end
-
-        #     Random.seed!(DEF_RANDOM_SEED + stats.restartCount)  # change seed each restart for reproducibility
-        #     perturbSolution!(x, xRound, binIdx, gIntIdx, lpCols)
-
-        #     stagnationCount = 0
-        #     bestIntGap = Inf
-        #     restarted = true
-        # else
-        #     xRound .= x  # initialize xRound from LP solution so continuous variables are not left at zero
-        #     roundSolution!(xRound, x, intIdx, heur.config.randRound)
-
-        #     if heur.config.lineSearch == :unitary
-        #     h = hashSolution(xRound, intIdx)
-        #     if h in visitedRounded
-        #         perturbSolution!(x, xRound, binIdx, gIntIdx, lpCols)
-        #     else
-        #         push!(visitedRounded, h)
-        #     end
-        # end
-
         xRound .= x  # initialize xRound from LP solution so continuous variables are not left at zero
         roundSolution!(xRound, x, intIdx, heur.config.randRound)
         
@@ -268,6 +235,33 @@ function SCIP.find_primal_solution(
                 end
             end
             push!(visitedRounded, h)
+        else
+            if stagnationCount >= DEF_MAX_STAGNATION
+                restarted = true
+                stats.restartCount += 1
+
+                if stats.restartCount >= DEF_MAX_RESTARTS
+                    stats.exitReason = :restart_limit
+                    break
+                end
+
+                if DEBUG_VERBOSE
+                    println("Stagnation detected at iteration $(stats.pumpIterations) (restart #$(stats.restartCount))")
+                    println("Perturbing:")
+                end
+
+                Random.seed!(DEF_RANDOM_SEED + stats.restartCount)
+                perturbSolution!(x, xRound, binIdx, gIntIdx, lpCols)
+
+                stagnationCount = 0
+                bestIntGap = Inf
+
+                if DEBUG_VERBOSE
+                    for i in intIdx
+                        @printf("  x[%d]: %.3f -> %d\n", i, x[i], Int(xRound[i]))
+                    end
+                end
+            end
         end
 
         # Check if rounded solution is feasible
@@ -305,6 +299,7 @@ function SCIP.find_primal_solution(
         # Step 2: "Projection" using Frank-Wolfe
         remainingTime = DEF_GLOBAL_TIME_LIMIT - (time() - heur.globalStartTime)
         fwStartTime = time()
+        ls = buildLineSearch(heur.config.lineSearch)
 
         fwResult = run_fw(
             heur.config.fwVariant,
@@ -329,7 +324,7 @@ function SCIP.find_primal_solution(
             xPrev .= xAfter
             continue  # skip rest of checks and go to next FPFW iteration
         else
-            xNew = isempty(fwTraj) ? fwResult.x : fwTraj[end][2]
+            xNew = fwResult.x
             if heur.config.warmStart && heur.config.fwVariant !== :vanilla
                 activeSet = fwResult.active_set
             end
@@ -338,11 +333,13 @@ function SCIP.find_primal_solution(
         # Cycle detection: check if we've visited this solution before
         intGap = f(xNew, xRound)
 
-        if isLowerThan(intGap, bestIntGap)
-            bestIntGap = intGap
-            stagnationCount = 0  # reset stagnation count if we made progress
-        else
-            stagnationCount += 1
+        if heur.config.lineSearch != :unitary
+            if isLowerThan(intGap, bestIntGap)
+                bestIntGap = intGap
+                stagnationCount = 0
+            else
+                stagnationCount += 1
+            end
         end
 
         if DEBUG_VERBOSE
