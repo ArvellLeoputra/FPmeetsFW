@@ -1,6 +1,6 @@
 function parseCfgFile(path::String)
     if !isfile(path)
-        error("Configuration file not found: $path")
+        error("Configuration file 'fpfw.cfg' not found: $path")
     end
 
     params = Dict{String, String}()
@@ -60,10 +60,8 @@ function loadConfig(args::Vector{String})
     end
     fileName = args[1]
 
-    if !isfile("fpfw.cfg")
-        error("Configuration file 'fpfw.cfg' not found.")
-    end
-    params = parseCfgFile("fpfw.cfg")
+    cfgPath = joinpath(@__DIR__, "fpfw.cfg")
+    params = parseCfgFile(cfgPath)
 
     for arg in args[2:end]
         if contains(arg, "=")
