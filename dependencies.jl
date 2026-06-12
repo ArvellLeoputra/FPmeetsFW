@@ -18,15 +18,8 @@ struct FPFWConfig
     seed::Int
 end
 
-mutable struct FPFWHeuristic <: SCIP.Heuristic
-    called::Int64
-    lmo::Union{Nothing, FrankWolfe.MathOptLMO}
-    config::FPFWConfig 
-    startTime::Float64
-end
-
 mutable struct FPFWStats
-    primalBound::Union{Float64, Nothing}
+    primalBound::Float64
     dualBound::Float64
     gap::Float64
     totalTime::Float64
@@ -37,9 +30,17 @@ mutable struct FPFWStats
     fwIterations::Int
     restartCount::Int
     solutionFound::Bool
-    exitReason::Symbol  # :none, :time_limit, :restart_limit, :infeasible_fw, :solution_found, :rr_solution_found, :solution_rejected, :scip_time_limit, :scip_node_limit, :scip_unbounded, :scip_unknown
+    exitReason::Symbol  # :none, :time_limit, :restart_limit, :infeasible_fw, :solution_found, :rr_solution_found, :scip_optimal, :scip_infeasible, :scip_time_limit, :scip_node_limit, :scip_unbounded, :scip_unknown
 
-    FPFWStats() = new(nothing, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, 0, false, :none)
+    FPFWStats() = new(Inf, Inf, Inf, 0.0, 0.0, 0.0, 0.0, 0, 0, 0, false, :none)
+end
+
+mutable struct FPFWHeuristic <: SCIP.Heuristic
+    called::Int64
+    lmo::Union{Nothing, FrankWolfe.MathOptLMO}
+    config::FPFWConfig
+    startTime::Float64
+    stats::FPFWStats
 end
 
 mutable struct PumpDisplayColumn

@@ -15,10 +15,9 @@ function SCIP.find_primal_solution(
     end
 
     result = SCIP.SCIP_DIDNOTFIND
-    stats = FPFWStats()
     startTime = time()
 
-    # SCIP is initially given DEF_SCIP_TIME_LIMIT (300s) to solve the LP relaxation.                                                                                                                                  
+    # SCIP is initially given DEF_SCIP_TIME_LIMIT (300s) to solve the LP relaxation.
     # Once the heuristic is called, extend to DEF_GLOBAL_TIME_LIMIT (480s) so SCIP doesn't terminate while the heuristic is running.
     SCIP.SCIPsetRealParam(scip, "limits/time", DEF_GLOBAL_TIME_LIMIT)
 
@@ -35,14 +34,14 @@ function SCIP.find_primal_solution(
     end
 
     # Log initial LP solve info
-    stats.dualBound = SCIP.SCIPgetDualbound(scip)
+    heur.stats.dualBound = SCIP.SCIPgetDualbound(scip)
     lpRootIter = SCIP.SCIPgetNRootLPIterations(scip)
     nFracVars = countFracVars(intIdx, initSol)
     rootTime = SCIP.SCIPgetSolvingTime(scip)
 
     printstyled("[initialSolve]\n", color=:cyan)
     @printf("Initial LP: lpiter=%d obj=%.2f frac=%d/%d time=%.2fs\n", 
-            lpRootIter, stats.dualBound, nFracVars, length(intIdx), rootTime)
+            lpRootIter, heur.stats.dualBound, nFracVars, length(intIdx), rootTime)
 
     if DEBUG_VERBOSE
         printstyled("[debug info]\n", color=:yellow)
@@ -114,7 +113,7 @@ function SCIP.find_primal_solution(
                     @printf("FW escaped rounding target at step %d: obj=%.4f projObj=%.4f step=%.4f nFrac=%d\n",
                             escFwIters, obj, intGap, step, nFrac)
                 else
-                    printRow!(pumpDisplay, stats.pumpIterations, obj, intGap, step, nFrac, escFwIters, iterTime, "escape")
+                    printRow!(pumpDisplay, heur.stats.pumpIterations, obj, intGap, step, nFrac, escFwIters, iterTime, "escape")
                 end
 
                 return false  # stop FW iter early
@@ -128,26 +127,26 @@ function SCIP.find_primal_solution(
         printstyled("[pump]\n", color=:cyan)
     end
 
-    pumpDisplay = PumpDisplay(PumpDisplayColumn[])                                                                                                                                                                                   
-    addColumn!(pumpDisplay, "pumpIter", 10)                                                                                                                                                                                         
-    addColumn!(pumpDisplay, "obj", 15, 4)                                                                                                                                                                                           
-    addColumn!(pumpDisplay, "projObj", 15, 4)                                                                                                                                                                                       
-    addColumn!(pumpDisplay, "step", 15, 4)                                                                                                                                                                                          
-    addColumn!(pumpDisplay, "nFrac", 8)                                                                                                                                                                                             
-    addColumn!(pumpDisplay, "fwIters", 10)                                                                                                                                                                                          
-    addColumn!(pumpDisplay, "time", 10, 2)                                                                                                                                                                                          
-    addColumn!(pumpDisplay, "flag", 18)   
-                                                                                                                                                                                        
+    pumpDisplay = PumpDisplay(PumpDisplayColumn[])
+    addColumn!(pumpDisplay, "pumpIter", 10)
+    addColumn!(pumpDisplay, "obj", 15, 4)
+    addColumn!(pumpDisplay, "projObj", 15, 4)
+    addColumn!(pumpDisplay, "step", 15, 4)
+    addColumn!(pumpDisplay, "nFrac", 8)
+    addColumn!(pumpDisplay, "fwIters", 10)
+    addColumn!(pumpDisplay, "time", 10, 2)
+    addColumn!(pumpDisplay, "flag", 18)
+
     if !DEBUG_VERBOSE
         printHeader!(pumpDisplay)
     end
 
     # Main FPFW loop
     while true
-        stats.pumpIterations += 1
+        heur.stats.pumpIterations += 1
         
         if DEBUG_VERBOSE
-            printstyled("\nFPFW Iteration $(stats.pumpIterations)\n"; color=:blue)
+            printstyled("\nFPFW Iteration $(heur.stats.pumpIterations)\n"; color=:blue)
         end
 
         iterStartTime = time()
@@ -155,11 +154,11 @@ function SCIP.find_primal_solution(
 
         # Check time limit
         if iterStartTime - heur.startTime > DEF_GLOBAL_TIME_LIMIT
-            stats.exitReason = :time_limit
+            heur.stats.exitReason = :time_limit
             break
         end
 
-        if heur.config.randFeasCheck && stats.pumpIterations > 1  # skip randomized rounding in the first iteration to save time
+        if heur.config.randFeasCheck && heur.stats.pumpIterations > 1  # skip randomized rounding in the first iteration to save time
             rrStartTime = time()
             for _ in 1:attempts
                 for i in intIdx
@@ -168,8 +167,8 @@ function SCIP.find_primal_solution(
                 end
 
                 if submitSolution(scip, heur_ptr, lpCols, xTemp, nvars)
-                    stats.solutionFound = true
-                    stats.exitReason = :rr_solution_found
+                    heur.stats.solutionFound = true
+                    heur.stats.exitReason = :rr_solution_found
                     result = SCIP.SCIP_FOUNDSOL
 
                     if DEBUG_VERBOSE
@@ -182,15 +181,15 @@ function SCIP.find_primal_solution(
                 end
             end
 
-            stats.rrTime += time() - rrStartTime
-                
-            if stats.solutionFound                                                                                                                                                                                                
-                obj = sum(xTemp[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lpCols[j])) for j in 1:nvars)                                                                                                                        
-                iterTime = time() - iterStartTime                                                                                                                                                                                 
+            heur.stats.rrTime += time() - rrStartTime
+
+            if heur.stats.solutionFound
+                obj = sum(xTemp[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lpCols[j])) for j in 1:nvars)
+                iterTime = time() - iterStartTime
                 if !DEBUG_VERBOSE
-                    printRow!(pumpDisplay, stats.pumpIterations, obj, NaN, NaN, 0, 0, iterTime, "randFeasCheck")
+                    printRow!(pumpDisplay, heur.stats.pumpIterations, obj, NaN, NaN, 0, 0, iterTime, "randFeasCheck")
                 end
-                break                                                                                                                                                                                                             
+                break
             end
         end
 
@@ -203,24 +202,24 @@ function SCIP.find_primal_solution(
                 @printf("  x[%d]: %.3f -> %d\n", i, x[i], Int(xRound[i]))
             end
         end
-        
+
         if heur.config.lineSearch == :unitary
             h = hashSolution(xRound, intIdx)
             if h in visitedRounded
                 restarted = true
-                stats.restartCount += 1
+                heur.stats.restartCount += 1
 
-                if stats.restartCount >= DEF_MAX_RESTARTS
-                    stats.exitReason = :restart_limit
+                if heur.stats.restartCount >= DEF_MAX_RESTARTS
+                    heur.stats.exitReason = :restart_limit
                     break
                 end
 
                 if DEBUG_VERBOSE
-                    println("Cycle detected at iteration $(stats.pumpIterations) (restart #$(stats.restartCount))")
+                    println("Cycle detected at iteration $(heur.stats.pumpIterations) (restart #$(heur.stats.restartCount))")
                     println("Perturbing:")
                 end
 
-                Random.seed!(config.seed + stats.restartCount)
+                Random.seed!(config.seed + heur.stats.restartCount)
                 perturbSolution!(x, xRound, binIdx, gIntIdx, lpCols)
                 h = hashSolution(xRound, intIdx)
 
@@ -234,19 +233,19 @@ function SCIP.find_primal_solution(
         else
             if stagnationCount >= DEF_MAX_STAGNATION
                 restarted = true
-                stats.restartCount += 1
+                heur.stats.restartCount += 1
 
-                if stats.restartCount >= DEF_MAX_RESTARTS
-                    stats.exitReason = :restart_limit
+                if heur.stats.restartCount >= DEF_MAX_RESTARTS
+                    heur.stats.exitReason = :restart_limit
                     break
                 end
 
                 if DEBUG_VERBOSE
-                    println("Stagnation detected at iteration $(stats.pumpIterations) (restart #$(stats.restartCount))")
+                    println("Stagnation detected at iteration $(heur.stats.pumpIterations) (restart #$(heur.stats.restartCount))")
                     println("Perturbing:")
                 end
 
-                Random.seed!(config.seed + stats.restartCount)
+                Random.seed!(config.seed + heur.stats.restartCount)
                 perturbSolution!(x, xRound, binIdx, gIntIdx, lpCols)
 
                 stagnationCount = 0
@@ -262,27 +261,27 @@ function SCIP.find_primal_solution(
 
         # Check if rounded solution is feasible
         if submitSolution(scip, heur_ptr, lpCols, xRound, nvars)
-            stats.solutionFound = true
-            stats.exitReason = :solutionFound
+            heur.stats.solutionFound = true
+            heur.stats.exitReason = :solution_found
             result = SCIP.SCIP_FOUNDSOL
             obj = sum(xRound[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lpCols[j])) for j in 1:nvars)
             iterTime = time() - iterStartTime
             if !DEBUG_VERBOSE
-                printRow!(pumpDisplay, stats.pumpIterations, obj, 0.0, NaN, 0, 0, iterTime, restarted ? "restart+feasRound" : "feasRound")
+                printRow!(pumpDisplay, heur.stats.pumpIterations, obj, 0.0, NaN, 0, 0, iterTime, restarted ? "restart+feasRound" : "feasRound")
             end
             break
         end
 
-        feasible, sol = lpDiving!(scip, lpCols, intIdx, xRound, nvars)                                                                                                                                                              
+        feasible, sol = lpDiving!(scip, lpCols, intIdx, xRound, nvars)
         if feasible
             if submitSolution(scip, heur_ptr, lpCols, sol, nvars)
-                stats.solutionFound = true
-                stats.exitReason = :solutionFound
+                heur.stats.solutionFound = true
+                heur.stats.exitReason = :solution_found
                 result = SCIP.SCIP_FOUNDSOL
                 obj = sum(sol[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lpCols[j])) for j in 1:nvars)
                 iterTime = time() - iterStartTime
                 if !DEBUG_VERBOSE
-                    printRow!(pumpDisplay, stats.pumpIterations, obj, 0.0, NaN, 0, 0, iterTime, restarted ? "restart+divingLP" : "divingLP")
+                    printRow!(pumpDisplay, heur.stats.pumpIterations, obj, 0.0, NaN, 0, 0, iterTime, restarted ? "restart+divingLP" : "divingLP")
                 end
                 break
             end
@@ -310,9 +309,9 @@ function SCIP.find_primal_solution(
             remainingTime
         )
 
-        stats.fwTime += time() - fwStartTime
+        heur.stats.fwTime += time() - fwStartTime
         fwIters = length(fwTraj)
-        stats.fwIterations += fwIters
+        heur.stats.fwIterations += fwIters
 
         # If FW gives us intermediate solutions via callback that escape the rounding target, we immediately jump to next iteration with the escaped solution
         if fwEscaped
@@ -359,21 +358,22 @@ function SCIP.find_primal_solution(
         nFrac = count(i -> abs(xNew[i] - round(xNew[i])) > DEF_INT_TOLERANCE, intIdx)
         iterTime = time() - iterStartTime
 
-        if !DEBUG_VERBOSE
-            printRow!(pumpDisplay, stats.pumpIterations, obj, intGap, step, nFrac, fwIters, iterTime, restarted ? "restart" : "")
-        end
+        flag = restarted ? "restart" : ""
 
         # Safety check: FW must always return a feasible point (LP polytope is preserved)
         if !isFeasible
-            stats.exitReason = :infeasible_fw
+            heur.stats.exitReason = :infeasible_fw
+            if !DEBUG_VERBOSE
+                printRow!(pumpDisplay, heur.stats.pumpIterations, obj, intGap, step, nFrac, fwIters, iterTime, restarted ? "restart+infeasible_fw" : "infeasible_fw")
+            end
             break
         end
 
         if isIntegral
             # Submit solution to SCIP
             if submitSolution(scip, heur_ptr, lpCols, xNew, nvars)
-                stats.solutionFound = true
-                stats.exitReason = :solutionFound
+                heur.stats.solutionFound = true
+                heur.stats.exitReason = :solution_found
                 result = SCIP.SCIP_FOUNDSOL
 
                 if DEBUG_VERBOSE
@@ -382,28 +382,33 @@ function SCIP.find_primal_solution(
                         @printf("  x[%d] = %.3f\n", j, xNew[j])
                     end
                 end
+                if !DEBUG_VERBOSE
+                    printRow!(pumpDisplay, heur.stats.pumpIterations, obj, intGap, step, nFrac, fwIters, iterTime, flag)
+                end
                 break
             else
-                # stats.exitReason = :solution_rejected
-                # break
+                flag = restarted ? "restart+rejected" : "rejected"
+                if !DEBUG_VERBOSE
+                    printRow!(pumpDisplay, heur.stats.pumpIterations, obj, intGap, step, nFrac, fwIters, iterTime, flag)
+                end
                 xPrev .= xNew
                 x .= xNew
                 continue
             end
         else
             # Continue with the projected solution for next FW iteration
+            if !DEBUG_VERBOSE
+                printRow!(pumpDisplay, heur.stats.pumpIterations, obj, intGap, step, nFrac, fwIters, iterTime, flag)
+            end
             xPrev .= xNew
             x .= xNew
         end
     end
 
-    # Print final summary
-    stats.heurTime = time() - startTime
-    stats.totalTime = time() - heur.startTime
-    stats.primalBound = SCIP.SCIPgetNSols(scip) > 0 ? Float64(SCIP.SCIPgetPrimalbound(scip)) : nothing
-    stats.gap = Float64(SCIP.SCIPgetGap(scip))
-
-    printHeurSummary(stats)
+    heur.stats.heurTime = time() - startTime
+    heur.stats.totalTime = time() - heur.startTime
+    heur.stats.primalBound = SCIP.SCIPgetNSols(scip) > 0 ? Float64(SCIP.SCIPgetPrimalbound(scip)) : nothing
+    heur.stats.gap = Float64(SCIP.SCIPgetGap(scip))
 
     return (SCIP.SCIP_OKAY, result)
 end

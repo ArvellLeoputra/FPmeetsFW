@@ -1,37 +1,32 @@
-function printHeurSummary(stats::FPFWStats)
-    exit_msg = if stats.exitReason == :time_limit
-        "global time limit $(DEF_GLOBAL_TIME_LIMIT)s reached"
-    elseif stats.exitReason == :restart_limit
-        "FP cycled $(DEF_MAX_RESTARTS) times without progress"
-    elseif stats.exitReason == :infeasible_fw
-        "FW returned a point outside the feasible polytope (numerical error)"
-    elseif stats.exitReason == :solutionFound
-        "integer feasible solution accepted by SCIP at iteration $(stats.pumpIterations)"
-    elseif stats.exitReason == :rr_solution_found
-        "integer feasible solution found by randomized rounding at iteration $(stats.pumpIterations)"
-    elseif stats.exitReason == :solution_rejected
-        "integer feasible solution found but rejected by SCIP"
-    else
-        "unknown exit"
+function buildStats(scip::SCIP.SCIPData, startTime::Float64, heur::FPFWHeuristic)
+    if heur.called > 0
+        return heur.stats
     end
 
-    heurTime = stats.heurTime == 0.0 ? "N/A" : "$(round(stats.heurTime, digits=2))s"  # 0.0 means heuristic never ran
-    primalBound = stats.primalBound === nothing ? "N/A" : "$(round(stats.primalBound, digits=4))"
-    gap = isinf(stats.gap) || stats.gap > 1e15 ? "Infinite" : @sprintf("%.2f %%", stats.gap * 100)
+    stats = FPFWStats()
+    stats.primalBound = normalizeInf(Float64(SCIP.SCIPgetPrimalbound(scip)))
+    stats.dualBound = normalizeInf(Float64(SCIP.SCIPgetDualbound(scip)))
+    stats.gap = normalizeInf(Float64(SCIP.SCIPgetGap(scip)))
 
-    printstyled("[result]\n", color=:cyan)
-    println("primalBound = $primalBound")
-    println("dualBound = $(stats.dualBound)")
-    println("gap = $gap")
-    println("totalTime = $(round(stats.totalTime, digits=2))s")
-    println("totalHeurTime = $heurTime")
-    println("fwTime = $(round(stats.fwTime, digits=2))s")
-    println("randRoundTime = $(round(stats.rrTime, digits=2))s")
-    println("pumpIterations = $(stats.pumpIterations)")
-    println("fwIterations = $(stats.fwIterations)")
-    println("restartCount = $(stats.restartCount)")
-    println("solFound = $(stats.solutionFound)")
-    println("exitReason = $exit_msg")
+    stats.totalTime = time() - startTime
+    stats.solutionFound = SCIP.SCIPgetNSols(scip) > 0
+
+    status = SCIP.SCIPgetStatus(scip)
+    if status == SCIP.SCIP_STATUS_OPTIMAL
+        stats.exitReason = :scip_optimal
+    elseif status == SCIP.SCIP_STATUS_INFEASIBLE
+        stats.exitReason = :scip_infeasible
+    elseif status == SCIP.SCIP_STATUS_UNBOUNDED
+        stats.exitReason = :scip_unbounded
+    elseif status == SCIP.SCIP_STATUS_TIMELIMIT
+        stats.exitReason = :scip_time_limit
+    elseif status == SCIP.SCIP_STATUS_NODELIMIT
+        stats.exitReason = :scip_node_limit
+    else
+        stats.exitReason = :scip_unknown
+    end
+
+    return stats
 end
 
 function printRunInfo(scip::SCIP.SCIPData, fileName::String)
@@ -52,7 +47,6 @@ function printRunInfo(scip::SCIP.SCIPData, fileName::String)
     println("binaryVars = $binCount")
     println("integerVars = $intCount")
     println("continuousVars = $contCount")
-    
 end
 
 function printConfigs(config::FPFWConfig)
@@ -67,31 +61,52 @@ function printConfigs(config::FPFWConfig)
     println("seed = $(config.seed)")
 end
 
-function printSCIPSummary(stats::FPFWStats)
-    exit_msg = if stats.exitReason == :scip_optimal
-        "problem solved by SCIP before heuristic was called"
+function printResults(stats::FPFWStats)
+    exitMsg = if stats.exitReason == :time_limit
+        "global time limit $(DEF_GLOBAL_TIME_LIMIT)s reached"
+    elseif stats.exitReason == :restart_limit
+        "FP cycled $(DEF_MAX_RESTARTS) times without progress"
+    elseif stats.exitReason == :infeasible_fw
+        "FW returned a point outside the feasible polytope (numerical error)"
+    elseif stats.exitReason == :solution_found
+        "integer feasible solution accepted by SCIP at iteration $(stats.pumpIterations)"
+    elseif stats.exitReason == :rr_solution_found
+        "integer feasible solution found by randomized rounding at iteration $(stats.pumpIterations)"
+    elseif stats.exitReason == :scip_optimal
+        "problem solved to optimality by SCIP before heuristic was called"
     elseif stats.exitReason == :scip_infeasible
-        "problem is infeasible"
+        "LP is infeasible, thus MIP is infeasible"
     elseif stats.exitReason == :scip_time_limit
         "SCIP time limit $(DEF_SCIP_TIME_LIMIT)s reached before heuristic was called"
     elseif stats.exitReason == :scip_node_limit
         "SCIP node limit reached before heuristic was called"
     elseif stats.exitReason == :scip_unbounded
-        "problem is unbounded"
+        "LP is unbounded, thus MIP is unbounded"
     else
         "unknown exit"
     end
 
-    primalBound = stats.primalBound === nothing ? "N/A" : "$(round(stats.primalBound, digits=4))"
-    gap = isinf(stats.gap) || stats.gap > 1e15 ? "Infinite" : @sprintf("%.2f %%", stats.gap * 100)
+    primalBound = isinf(stats.primalBound) ? "Inf" : "$(round(stats.primalBound, digits=4))"
+    dualBound = isinf(stats.dualBound) ? "Inf" : "$(round(stats.dualBound, digits=4))"
+    gap = isinf(stats.gap) ? "Inf" : @sprintf("%.2f %%", stats.gap * 100)
 
     printstyled("[result]\n", color=:cyan)
     println("primalBound = $primalBound")
-    println("dualBound = $(stats.dualBound)")
+    println("dualBound = $dualBound")
     println("gap = $gap")
     println("totalTime = $(round(stats.totalTime, digits=2))s")
     println("solFound = $(stats.solutionFound)")
-    println("exitReason = $exit_msg")
+
+    if !startswith(string(stats.exitReason), "scip_")
+        println("totalHeurTime = $(round(stats.heurTime, digits=2))s")
+        println("fwTime = $(round(stats.fwTime, digits=2))s")
+        println("randRoundTime = $(round(stats.rrTime, digits=2))s")
+        println("pumpIterations = $(stats.pumpIterations)")
+        println("fwIterations = $(stats.fwIterations)")
+        println("restartCount = $(stats.restartCount)")
+    end
+
+    println("exitReason = $exitMsg")
 end
 
 function addColumn!(display::PumpDisplay, name::String, width::Int, decimals::Int = 0)
@@ -115,7 +130,7 @@ function printRow!(display::PumpDisplay, values...)
     println()
 end
 
-function areValsEqual(x1::Float64, x2::Float64, tol::Float64=DEF_INT_TOLERANCE)
+function areValuesEqual(x1::Float64, x2::Float64, tol::Float64=DEF_INT_TOLERANCE)
     return abs(x1 - x2) <= tol
 end
 
@@ -125,24 +140,34 @@ end
 
 function areSolutionsEqual(intIdx::Vector{Int}, x1::Vector{Float64}, x2::Vector{Float64}, tol::Float64=DEF_INT_TOLERANCE)
     for i in intIdx
-        if !areValsEqual(x1[i], x2[i], tol)
+        if !areValuesEqual(x1[i], x2[i], tol)
             return false
         end
     end
     return true
 end
 
+function normalizeInf(x::Float64)
+    if x > 1e15
+        return Inf
+    elseif x < -1e15
+        return -Inf
+    else
+        return x
+    end
+end
+
 function countFracVars(intIdx::Vector{Int},x::Vector{Float64}, tol::Float64=DEF_INT_TOLERANCE)
     cnt = 0
     for i in intIdx
-        if !areValsEqual(x[i], round(x[i]), tol)
+        if !areValuesEqual(x[i], round(x[i]), tol)
             cnt += 1
         end
     end
     return cnt
 end
 
-function getLPData(scip::Ptr{SCIP.SCIP_}, nvars::Int32, nrows::Int32,)
+function getLPData(scip::Ptr{SCIP.SCIP_}, nvars::Int32, nrows::Int32)
     colsPtr = SCIP.SCIPgetLPCols(scip)
     lpCols = unsafe_wrap(Vector{Ptr{SCIP.SCIP_COL}}, colsPtr, nvars)
     colDict = Dict(lpCols[k] => k for k in 1:nvars)
@@ -180,7 +205,6 @@ function roundSolution!(xRound::Vector{Float64}, x::Vector{Float64}, intIdx::Vec
 end
 
 # Hash function for cycle detection (only hashes integer variable values)
-# Not used currently
 function hashSolution(x::Vector{Float64}, intIdx::Vector{Int})
     hash(tuple((x[i] for i in intIdx)...))
 end
@@ -293,7 +317,7 @@ end
 # Helper function to check integrality
 function isSolutionIntegral(sol::Vector{Float64}, intIdx::Vector{Int}, tol::Float64=DEF_INT_TOLERANCE)
     for i in intIdx
-        if !areValsEqual(sol[i], round(sol[i]), tol)
+        if !areValuesEqual(sol[i], round(sol[i]), tol)
             return false
         end
     end
