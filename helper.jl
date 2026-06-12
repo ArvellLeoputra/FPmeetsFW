@@ -63,7 +63,7 @@ end
 
 function printResults(stats::FPFWStats)
     exitMsg = if stats.exitReason == :time_limit
-        "global time limit $(DEF_GLOBAL_TIME_LIMIT)s reached"
+        "pump time limit $(DEF_PUMP_TIME_LIMIT)s reached"
     elseif stats.exitReason == :restart_limit
         "FP cycled $(DEF_MAX_RESTARTS) times without progress"
     elseif stats.exitReason == :infeasible_fw

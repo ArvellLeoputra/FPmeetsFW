@@ -18,8 +18,8 @@ function SCIP.find_primal_solution(
     startTime = time()
 
     # SCIP is initially given DEF_SCIP_TIME_LIMIT (300s) to solve the LP relaxation.
-    # Once the heuristic is called, extend to DEF_GLOBAL_TIME_LIMIT (480s) so SCIP doesn't terminate while the heuristic is running.
-    SCIP.SCIPsetRealParam(scip, "limits/time", DEF_GLOBAL_TIME_LIMIT)
+    # Once the heuristic is called, extend to 600s total so SCIP doesn't terminate mid-pump.
+    SCIP.SCIPsetRealParam(scip, "limits/time", DEF_SCIP_TIME_LIMIT + DEF_PUMP_TIME_LIMIT)
 
     # Get LP data
     nvars = SCIP.SCIPgetNLPCols(scip)
@@ -153,7 +153,7 @@ function SCIP.find_primal_solution(
         restarted = false
 
         # Check time limit
-        if iterStartTime - heur.startTime > DEF_GLOBAL_TIME_LIMIT
+        if iterStartTime - startTime > DEF_PUMP_TIME_LIMIT
             heur.stats.exitReason = :time_limit
             break
         end
@@ -292,7 +292,7 @@ function SCIP.find_primal_solution(
         empty!(fwTraj)
 
         # Step 2: "Projection" using Frank-Wolfe
-        remainingTime = DEF_GLOBAL_TIME_LIMIT - (time() - heur.startTime)
+        remainingTime = DEF_PUMP_TIME_LIMIT - (time() - startTime)
         fwStartTime = time()
         ls = buildLineSearch(heur.config.lineSearch)
 

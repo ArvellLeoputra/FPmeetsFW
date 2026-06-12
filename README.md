@@ -74,7 +74,7 @@ Settings are loaded in priority order: **command-line args > `fpfw.cfg`**
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `DEF_FW_MAX_ITER` | `1` | Max Frank-Wolfe iterations per FP projection step |
-| `DEF_GLOBAL_TIME_LIMIT` | `480s` | Total wall-clock time limit |
+| `DEF_PUMP_TIME_LIMIT` | `300s` | Total pump time limit |
 | `DEF_SCIP_TIME_LIMIT` | `300s` | SCIP solver time limit (for root LP solve) |
 | `DEF_INT_TOLERANCE` | `1e-6` | Tolerance for feasibility/integrality checks |
 | `DEF_FW_TOLERANCE` | `1e-7` | FW convergence tolerance (duality gap) |

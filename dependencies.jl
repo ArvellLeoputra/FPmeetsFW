@@ -61,7 +61,7 @@ const DEF_FW_TOLERANCE = 1e-7
 const DEF_FW_MAX_ITER = 1
 
 # Time limit
-const DEF_GLOBAL_TIME_LIMIT = 480.0
+const DEF_PUMP_TIME_LIMIT = 300.0
 const DEF_SCIP_TIME_LIMIT = 300.0
 
 # FW escape check: check if FW escapes its rounding point
