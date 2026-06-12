@@ -41,20 +41,20 @@ until x is integral or time limit / max iterations
 ## Usage
 
 ```bash
-julia --project run_test.jl <fileName.mps> [key=value ...]
+julia --project main.jl <fileName.mps> [key=value ...]
 ```
 
-All arguments are optional and fall back to `fpfw.cfg`, then to defaults in `dependencies.jl`.
+All arguments are optional and fall back to `fpfw.cfg`. The cfg file is required.
 
 Examples:
 ```bash
-julia --project run_test.jl ./testcase/test1.mps
-julia --project run_test.jl ./testcase/test1.mps norm=euclidean seed=123
+julia --project main.jl ./testcase/test1.mps
+julia --project main.jl ./testcase/test1.mps norm=euclidean seed=123
 ```
 
 ## Configuration
 
-Settings are loaded in priority order: **command-line args > `fpfw.cfg` > `dependencies.jl` defaults**
+Settings are loaded in priority order: **command-line args > `fpfw.cfg`**
 
 `fpfw.cfg` (run configuration):
 
@@ -66,7 +66,7 @@ Settings are loaded in priority order: **command-line args > `fpfw.cfg` > `depen
 | `randomizedRounding` | `false` | Randomized rounding threshold |
 | `randomFeasibilityCheck` | `false` | Randomized feasibility check |
 | `warmStart` | `true` | Warm-start FW active set across FP iterations |
-| `presolve` | `false` | Enable SCIP presolving |
+| `presolve` | `true` | Enable SCIP presolving |
 | `seed` | `42` | Random seed for reproducibility |
 
 `dependencies.jl` (algorithm constants):
@@ -91,12 +91,14 @@ Settings are loaded in priority order: **command-line args > `fpfw.cfg` > `depen
 ## File Structure
 
 ```
-├── run_test.jl          # Entry point (single run)
+├── main.jl              # Entry point — parses args and calls runInstance
 ├── fpfw.cfg             # Run configuration
-├── dependencies.jl      # Parameters and type definitions
+├── config.jl            # Configuration loading and validation
+├── runner.jl            # runInstance — sets up and runs the solver
+├── dependencies.jl      # Structs, constants, and valid option sets
 ├── fpfwheur.jl          # Main FPFW heuristic implementation
 ├── lmo_builder.jl       # Builds Linear Minimization Oracle from SCIP LP
 ├── fw_utils.jl          # Frank-Wolfe utility functions
-├── helper.jl            # Utility functions
-└── scip_setup.jl        # SCIP configuration
+├── helper.jl            # Print functions and solution utilities
+└── scip_setup.jl        # SCIP model setup and configuration
 ```

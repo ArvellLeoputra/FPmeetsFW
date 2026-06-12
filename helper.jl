@@ -11,10 +11,6 @@ function printHeurSummary(stats::FPFWStats)
         "integer feasible solution found by randomized rounding at iteration $(stats.pumpIterations)"
     elseif stats.exitReason == :solution_rejected
         "integer feasible solution found but rejected by SCIP"
-    elseif stats.exitReason == :scip_time_limit
-        "SCIP time limit $(DEF_SCIP_TIME_LIMIT)s exceeded, heuristic never called"
-    elseif stats.exitReason == :scip_solved                                                                                                                                                                                          
-        "problem solved by SCIP presolve/LP before heuristic was called"
     else
         "unknown exit"
     end
@@ -34,6 +30,66 @@ function printHeurSummary(stats::FPFWStats)
     println("pumpIterations = $(stats.pumpIterations)")
     println("fwIterations = $(stats.fwIterations)")
     println("restartCount = $(stats.restartCount)")
+    println("solFound = $(stats.solutionFound)")
+    println("exitReason = $exit_msg")
+end
+
+function printRunInfo(scip::SCIP.SCIPData, fileName::String)
+    varCount = SCIP.SCIPgetNOrigVars(scip)
+    origVars = unsafe_wrap(Vector{Ptr{SCIP.SCIP_VAR}}, SCIP.SCIPgetOrigVars(scip), varCount)
+    binCount = sum(SCIP.SCIPvarGetType(origVars[j]) == SCIP.SCIP_VARTYPE_BINARY for j in 1:varCount)
+    intCount = sum(SCIP.SCIPvarGetType(origVars[j]) == SCIP.SCIP_VARTYPE_INTEGER for j in 1:varCount)
+    contCount = varCount - binCount - intCount
+
+    name = basename(fileName)
+    while endswith(name, ".mps") || endswith(name, ".gz")
+        name = splitext(name)[1]
+    end
+
+    printstyled("[run info]\n", color=:cyan)
+    println("instance = $name")
+    println("totalVars = $varCount")
+    println("binaryVars = $binCount")
+    println("integerVars = $intCount")
+    println("continuousVars = $contCount")
+    
+end
+
+function printConfigs(config::FPFWConfig)
+    printstyled("[FPFW configs]\n", color=:cyan)
+    println("norm = $(config.norm)")
+    println("fwVariant = $(config.fwVariant)")
+    println("lineSearch = $(config.lineSearch)")
+    println("randomizedRounding = $(config.randRound ? "enabled" : "disabled")")
+    println("randomizedFeasibilityCheck = $(config.randFeasCheck ? "enabled" : "disabled")")
+    println("warmStart = $(config.warmStart ? "enabled" : "disabled")")
+    println("presolve = $(config.presolve ? "enabled" : "disabled")")
+    println("seed = $(config.seed)")
+end
+
+function printSCIPSummary(stats::FPFWStats)
+    exit_msg = if stats.exitReason == :scip_optimal
+        "problem solved by SCIP before heuristic was called"
+    elseif stats.exitReason == :scip_infeasible
+        "problem is infeasible"
+    elseif stats.exitReason == :scip_time_limit
+        "SCIP time limit $(DEF_SCIP_TIME_LIMIT)s reached before heuristic was called"
+    elseif stats.exitReason == :scip_node_limit
+        "SCIP node limit reached before heuristic was called"
+    elseif stats.exitReason == :scip_unbounded
+        "problem is unbounded"
+    else
+        "unknown exit"
+    end
+
+    primalBound = stats.primalBound === nothing ? "N/A" : "$(round(stats.primalBound, digits=4))"
+    gap = isinf(stats.gap) || stats.gap > 1e15 ? "Infinite" : @sprintf("%.2f %%", stats.gap * 100)
+
+    printstyled("[result]\n", color=:cyan)
+    println("primalBound = $primalBound")
+    println("dualBound = $(stats.dualBound)")
+    println("gap = $gap")
+    println("totalTime = $(round(stats.totalTime, digits=2))s")
     println("solFound = $(stats.solutionFound)")
     println("exitReason = $exit_msg")
 end

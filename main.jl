@@ -1,0 +1,11 @@
+include("dependencies.jl")
+include("config.jl")
+include("scip_setup.jl")
+include("helper.jl")
+include("fpfwheur.jl")
+include("lmo_builder.jl")
+include("fw_utils.jl")
+include("runner.jl")
+
+fileName, config = loadConfig(ARGS)
+runInstance(fileName, config)

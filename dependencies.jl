@@ -22,7 +22,7 @@ mutable struct FPFWHeuristic <: SCIP.Heuristic
     called::Int64
     lmo::Union{Nothing, FrankWolfe.MathOptLMO}
     config::FPFWConfig 
-    globalStartTime::Float64
+    startTime::Float64
 end
 
 mutable struct FPFWStats
@@ -37,7 +37,7 @@ mutable struct FPFWStats
     fwIterations::Int
     restartCount::Int
     solutionFound::Bool
-    exitReason::Symbol  # :none, :time_limit, :restart_limit, :infeasible_fw, :solution_found, :rr_solution_found, :solution_rejected, :scip_time_limit, :scip_solved
+    exitReason::Symbol  # :none, :time_limit, :restart_limit, :infeasible_fw, :solution_found, :rr_solution_found, :solution_rejected, :scip_time_limit, :scip_node_limit, :scip_unbounded, :scip_unknown
 
     FPFWStats() = new(nothing, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, 0, false, :none)
 end
@@ -73,30 +73,13 @@ const DEF_MAX_STAGNATION = 3       # Maximum number of iterations without improv
 const DEF_BIGM = 1e9               # Big M constant for cycle-breaking perturbations
 const DEF_BIGBIGM = 1e15           # Bigbig M constant for perturbations
 
-# Random seed for reproducibility
-const DEF_RANDOM_SEED = 42
-
-# Randomized rounding
-const DEF_RAND_ROUND = false
-
 # Randomized rounding feasibility check parameters
-const DEF_RAND_FEAS_CHECK = false
 const DEF_RAND_FEAS_ITER_LIMIT = 100
-
-# Warm-starting away/blended variants with the previous iteration's active set
-const DEF_WARM_START = true
-
-# Projection norm: :euclidean, :manhattan, :smoothManhattan
-const DEF_NORM = :manhattan
-
-# Frank-Wolfe variant: :vanilla, :away, :blended_pairwise, :blended
-const DEF_FW_VARIANT = :vanilla
-
-# Frank-Wolfe line search: :unitary, :agnostic, :backtracking, :secant, :adaptive
-const DEF_LINE_SEARCH = :unitary
-
-# Determine whether presolve on or off
-const DEF_PRESOLVE = true
 
 # Debug mode: set to true to print detailed step-by-step output
 const DEBUG_VERBOSE = false
+
+# Valid options for FPFWConfig fields
+const VALID_NORMS = (:euclidean, :manhattan, :smoothManhattan)
+const VALID_FW_VARIANTS = (:vanilla, :away, :blended_pairwise, :blended)
+const VALID_LINE_SEARCHES = (:agnostic, :backtracking, :secant, :adaptive, :unitary)

@@ -154,7 +154,7 @@ function SCIP.find_primal_solution(
         restarted = false
 
         # Check time limit
-        if iterStartTime - heur.globalStartTime > DEF_GLOBAL_TIME_LIMIT
+        if iterStartTime - heur.startTime > DEF_GLOBAL_TIME_LIMIT
             stats.exitReason = :time_limit
             break
         end
@@ -220,7 +220,7 @@ function SCIP.find_primal_solution(
                     println("Perturbing:")
                 end
 
-                Random.seed!(DEF_RANDOM_SEED + stats.restartCount)
+                Random.seed!(config.seed + stats.restartCount)
                 perturbSolution!(x, xRound, binIdx, gIntIdx, lpCols)
                 h = hashSolution(xRound, intIdx)
 
@@ -246,7 +246,7 @@ function SCIP.find_primal_solution(
                     println("Perturbing:")
                 end
 
-                Random.seed!(DEF_RANDOM_SEED + stats.restartCount)
+                Random.seed!(config.seed + stats.restartCount)
                 perturbSolution!(x, xRound, binIdx, gIntIdx, lpCols)
 
                 stagnationCount = 0
@@ -293,7 +293,7 @@ function SCIP.find_primal_solution(
         empty!(fwTraj)
 
         # Step 2: "Projection" using Frank-Wolfe
-        remainingTime = DEF_GLOBAL_TIME_LIMIT - (time() - heur.globalStartTime)
+        remainingTime = DEF_GLOBAL_TIME_LIMIT - (time() - heur.startTime)
         fwStartTime = time()
         ls = buildLineSearch(heur.config.lineSearch)
 
@@ -399,7 +399,7 @@ function SCIP.find_primal_solution(
 
     # Print final summary
     stats.heurTime = time() - startTime
-    stats.totalTime = time() - heur.globalStartTime
+    stats.totalTime = time() - heur.startTime
     stats.primalBound = SCIP.SCIPgetNSols(scip) > 0 ? Float64(SCIP.SCIPgetPrimalbound(scip)) : nothing
     stats.gap = Float64(SCIP.SCIPgetGap(scip))
 
