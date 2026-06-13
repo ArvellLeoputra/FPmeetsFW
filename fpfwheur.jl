@@ -17,10 +17,6 @@ function SCIP.find_primal_solution(
     result = SCIP.SCIP_DIDNOTFIND
     startTime = time()
 
-    # SCIP is initially given DEF_SCIP_TIME_LIMIT (300s) to solve the LP relaxation.
-    # Once the heuristic is called, extend to 600s total so SCIP doesn't terminate mid-pump.
-    SCIP.SCIPsetRealParam(scip, "limits/time", DEF_SCIP_TIME_LIMIT + DEF_PUMP_TIME_LIMIT)
-
     # Get LP data
     nvars = SCIP.SCIPgetNLPCols(scip)
     nrows = SCIP.SCIPgetNLPRows(scip)
@@ -34,7 +30,7 @@ function SCIP.find_primal_solution(
     end
 
     # Log initial LP solve info
-    heur.stats.dualBound = SCIP.SCIPgetDualbound(scip)
+    heur.stats.dualBound = normalizeInf(Float64(SCIP.SCIPgetDualbound(scip)))
     lpRootIter = SCIP.SCIPgetNRootLPIterations(scip)
     nFracVars = countFracVars(intIdx, initSol)
     rootTime = SCIP.SCIPgetSolvingTime(scip)
@@ -219,7 +215,7 @@ function SCIP.find_primal_solution(
                     println("Perturbing:")
                 end
 
-                Random.seed!(config.seed + heur.stats.restartCount)
+                Random.seed!(heur.config.seed + heur.stats.restartCount)
                 perturbSolution!(x, xRound, binIdx, gIntIdx, lpCols)
                 h = hashSolution(xRound, intIdx)
 
@@ -245,7 +241,7 @@ function SCIP.find_primal_solution(
                     println("Perturbing:")
                 end
 
-                Random.seed!(config.seed + heur.stats.restartCount)
+                Random.seed!(heur.config.seed + heur.stats.restartCount)
                 perturbSolution!(x, xRound, binIdx, gIntIdx, lpCols)
 
                 stagnationCount = 0
@@ -407,8 +403,8 @@ function SCIP.find_primal_solution(
 
     heur.stats.heurTime = time() - startTime
     heur.stats.totalTime = time() - heur.startTime
-    heur.stats.primalBound = SCIP.SCIPgetNSols(scip) > 0 ? Float64(SCIP.SCIPgetPrimalbound(scip)) : nothing
-    heur.stats.gap = Float64(SCIP.SCIPgetGap(scip))
+    heur.stats.primalBound = normalizeInf(Float64(SCIP.SCIPgetPrimalbound(scip)))
+    heur.stats.gap = normalizeInf(Float64(SCIP.SCIPgetGap(scip)))
 
     return (SCIP.SCIP_OKAY, result)
 end
