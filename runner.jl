@@ -1,5 +1,7 @@
 function runInstance(fileName::String, config::FPFWConfig)
-    startTime= time()
+    printstyled("Timestamp: ", Dates.format(Dates.now(), "yyyy-mm-dd HH:MM:SS"), "\n", color=:cyan)
+
+    startTime = time()
     Random.seed!(config.seed)
 
     model = minimal_setup(presolve=config.presolve)
@@ -11,7 +13,7 @@ function runInstance(fileName::String, config::FPFWConfig)
     printRunInfo(scip, fileName)
     printConfigs(config)
 
-    heur = FPFWHeuristic(0, nothing, config, startTime, FPFWStats())
+    heur = FPFWHeuristic(0, nothing, config, FPFWStats())
     SCIP.include_heuristic(
         backend,
         heur,
@@ -21,7 +23,9 @@ function runInstance(fileName::String, config::FPFWConfig)
     )
     SCIP.SCIPsolve(scip)
 
-    stats = buildStats(scip, startTime, heur)
+    totalTime = timeElapsed(startTime)
+
+    stats = buildStats(scip, heur, totalTime)
     printResults(stats)
 
     return nothing

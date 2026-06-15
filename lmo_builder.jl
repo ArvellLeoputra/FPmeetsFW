@@ -2,6 +2,7 @@
 # TODO: Build LMO independently of SCIP LP
 # TODO: Multi heuristic calls
 function build_lmo_from_scip_lp(scip::Ptr{SCIP.SCIP_}, nvars, nrows)
+    lmoStart = time()
     ptr_cols = SCIP.SCIPgetLPCols(scip)
     lp_cols = unsafe_wrap(Vector{Ptr{SCIP.SCIP_COL}}, ptr_cols, nvars)
 
@@ -60,6 +61,9 @@ function build_lmo_from_scip_lp(scip::Ptr{SCIP.SCIP_}, nvars, nrows)
             MOI.add_constraint(optModel, aff, MOI.LessThan(rhs))
         end
     end
+
+    lmoTime = timeElapsed(lmoStart)
+    println("LMO build time = $lmoTime")
 
     # use_modify = false to set a new objective each iteration without modifying the model structure
     return FrankWolfe.MathOptLMO(optModel, false)  # might be slower, but safer

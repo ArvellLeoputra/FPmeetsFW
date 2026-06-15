@@ -4,6 +4,7 @@ using SCIP
 using FrankWolfe
 using Random
 using Printf
+using Dates
 import MathOptInterface
 const MOI = MathOptInterface
 
@@ -39,7 +40,6 @@ mutable struct FPFWHeuristic <: SCIP.Heuristic
     called::Int64
     lmo::Union{Nothing, FrankWolfe.MathOptLMO}
     config::FPFWConfig
-    startTime::Float64
     stats::FPFWStats
 end
 

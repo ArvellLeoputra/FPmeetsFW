@@ -15,7 +15,7 @@ function SCIP.find_primal_solution(
     end
 
     result = SCIP.SCIP_DIDNOTFIND
-    startTime = time()
+    heurStartTime = time()
 
     # Get LP data
     nvars = SCIP.SCIPgetNLPCols(scip)
@@ -25,6 +25,7 @@ function SCIP.find_primal_solution(
 
     # Build LMO from current LP
     # Currently not useful, since we set the heuristic to only run once
+    # Another idea is to restructure the LMO in a single heuristic run to decrease the feasible region
     if heur.lmo === nothing
         heur.lmo = build_lmo_from_scip_lp(scip, nvars, nrows)
     end
@@ -63,7 +64,7 @@ function SCIP.find_primal_solution(
     restarted = false
     visitedRounded = Set{UInt}()
 
-    # Randomized rounding parameters
+    # Randomized feasibility check parameters
     attempts = min(DEF_RAND_FEAS_ITER_LIMIT, length(intIdx))
 
     # FW escape flag and buffer
@@ -103,7 +104,7 @@ function SCIP.find_primal_solution(
                 intGap = f(xAfter, xRound)
                 nFrac = count(i -> abs(xAfter[i] - round(xAfter[i])) > DEF_INT_TOLERANCE, intIdx)
                 escFwIters = state.t
-                iterTime = time() - iterStartTime
+                iterTime = timeElapsed(iterStartTime)
 
                 if DEBUG_VERBOSE
                     @printf("FW escaped rounding target at step %d: obj=%.4f projObj=%.4f step=%.4f nFrac=%d\n",
@@ -140,16 +141,16 @@ function SCIP.find_primal_solution(
     # Main FPFW loop
     while true
         heur.stats.pumpIterations += 1
+        restarted = false
         
         if DEBUG_VERBOSE
             printstyled("\nFPFW Iteration $(heur.stats.pumpIterations)\n"; color=:blue)
         end
 
-        iterStartTime = time()
-        restarted = false
+        iterStartTime = time()  # FP iter start time
 
         # Check time limit
-        if iterStartTime - startTime > DEF_PUMP_TIME_LIMIT
+        if timeElapsed(heurStartTime) > DEF_PUMP_TIME_LIMIT
             heur.stats.exitReason = :time_limit
             break
         end
@@ -177,11 +178,11 @@ function SCIP.find_primal_solution(
                 end
             end
 
-            heur.stats.rrTime += time() - rrStartTime
+            heur.stats.rrTime += timeElapsed(rrStartTime)
 
             if heur.stats.solutionFound
                 obj = sum(xTemp[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lpCols[j])) for j in 1:nvars)
-                iterTime = time() - iterStartTime
+                iterTime = timeElapsed(iterStartTime)
                 if !DEBUG_VERBOSE
                     printRow!(pumpDisplay, heur.stats.pumpIterations, obj, NaN, NaN, 0, 0, iterTime, "randFeasCheck")
                 end
@@ -205,14 +206,14 @@ function SCIP.find_primal_solution(
                 restarted = true
                 heur.stats.restartCount += 1
 
-                if heur.stats.restartCount >= DEF_MAX_RESTARTS
-                    heur.stats.exitReason = :restart_limit
-                    break
-                end
-
                 if DEBUG_VERBOSE
                     println("Cycle detected at iteration $(heur.stats.pumpIterations) (restart #$(heur.stats.restartCount))")
                     println("Perturbing:")
+                end
+
+                if heur.stats.restartCount >= DEF_MAX_RESTARTS
+                    heur.stats.exitReason = :restart_limit
+                    break
                 end
 
                 Random.seed!(heur.config.seed + heur.stats.restartCount)
@@ -261,7 +262,7 @@ function SCIP.find_primal_solution(
             heur.stats.exitReason = :solution_found
             result = SCIP.SCIP_FOUNDSOL
             obj = sum(xRound[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lpCols[j])) for j in 1:nvars)
-            iterTime = time() - iterStartTime
+            iterTime = timeElapsed(iterStartTime)
             if !DEBUG_VERBOSE
                 printRow!(pumpDisplay, heur.stats.pumpIterations, obj, 0.0, NaN, 0, 0, iterTime, restarted ? "restart+feasRound" : "feasRound")
             end
@@ -275,7 +276,7 @@ function SCIP.find_primal_solution(
                 heur.stats.exitReason = :solution_found
                 result = SCIP.SCIP_FOUNDSOL
                 obj = sum(sol[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lpCols[j])) for j in 1:nvars)
-                iterTime = time() - iterStartTime
+                iterTime = timeElapsed(iterStartTime)
                 if !DEBUG_VERBOSE
                     printRow!(pumpDisplay, heur.stats.pumpIterations, obj, 0.0, NaN, 0, 0, iterTime, restarted ? "restart+divingLP" : "divingLP")
                 end
@@ -288,7 +289,7 @@ function SCIP.find_primal_solution(
         empty!(fwTraj)
 
         # Step 2: "Projection" using Frank-Wolfe
-        remainingTime = DEF_PUMP_TIME_LIMIT - (time() - startTime)
+        remainingTime = DEF_PUMP_TIME_LIMIT - (timeElapsed(heurStartTime))
         fwStartTime = time()
         ls = buildLineSearch(heur.config.lineSearch)
 
@@ -305,7 +306,7 @@ function SCIP.find_primal_solution(
             remainingTime
         )
 
-        heur.stats.fwTime += time() - fwStartTime
+        heur.stats.fwTime += elapsedTime(fwStartTime)
         fwIters = length(fwTraj)
         heur.stats.fwIterations += fwIters
 
@@ -352,7 +353,7 @@ function SCIP.find_primal_solution(
         obj = sum(xNew[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lpCols[j])) for j in 1:nvars)
         step = f(xNew, xPrev)
         nFrac = count(i -> abs(xNew[i] - round(xNew[i])) > DEF_INT_TOLERANCE, intIdx)
-        iterTime = time() - iterStartTime
+        iterTime = elapsedTime(iterStartTime)
 
         flag = restarted ? "restart" : ""
 
@@ -401,8 +402,7 @@ function SCIP.find_primal_solution(
         end
     end
 
-    heur.stats.heurTime = time() - startTime
-    heur.stats.totalTime = time() - heur.startTime
+    heur.stats.heurTime = timeElapsed(heurStartTime)
     heur.stats.primalBound = normalizeInf(Float64(SCIP.SCIPgetPrimalbound(scip)))
     heur.stats.gap = normalizeInf(Float64(SCIP.SCIPgetGap(scip)))
 

@@ -1,4 +1,8 @@
-function buildStats(scip::SCIP.SCIPData, startTime::Float64, heur::FPFWHeuristic)
+function timeElapsed(start::Float64)
+    return time() - start
+end
+
+function buildStats(scip::SCIP.SCIPData, heur::FPFWHeuristic, totalTime::Float64)
     if heur.called > 0
         return heur.stats
     end
@@ -8,7 +12,7 @@ function buildStats(scip::SCIP.SCIPData, startTime::Float64, heur::FPFWHeuristic
     stats.dualBound = normalizeInf(Float64(SCIP.SCIPgetDualbound(scip)))
     stats.gap = normalizeInf(Float64(SCIP.SCIPgetGap(scip)))
 
-    stats.totalTime = time() - startTime
+    stats.totalTime = totalTime
     stats.solutionFound = SCIP.SCIPgetNSols(scip) > 0
 
     status = SCIP.SCIPgetStatus(scip)
