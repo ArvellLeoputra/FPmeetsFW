@@ -31,9 +31,9 @@ function SCIP.find_primal_solution(
     end
 
     # Log initial LP solve info
-    heur.stats.dualBound = normalizeInf(Float64(SCIP.SCIPgetDualbound(scip)))
+    heur.stats.dualBound = Float64(SCIP.SCIPgetDualbound(scip))
     lpRootIter = SCIP.SCIPgetNRootLPIterations(scip)
-    nFracVars = countFracVars(intIdx, initSol)
+    nFracVars = SCIP.SCIPgetNLPBranchCands(scip)
     rootTime = SCIP.SCIPgetSolvingTime(scip)
 
     printstyled("[initialSolve]\n", color=:cyan)
@@ -403,8 +403,8 @@ function SCIP.find_primal_solution(
     end
 
     heur.stats.heurTime = timeElapsed(heurStartTime)
-    heur.stats.primalBound = normalizeInf(Float64(SCIP.SCIPgetPrimalbound(scip)))
-    heur.stats.gap = normalizeInf(Float64(SCIP.SCIPgetGap(scip)))
+    heur.stats.primalBound = Float64(SCIP.SCIPgetPrimalbound(scip))
+    heur.stats.gap = Float64(SCIP.SCIPgetGap(scip))
 
     return (SCIP.SCIP_OKAY, result)
 end

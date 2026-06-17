@@ -4,13 +4,14 @@ end
 
 function buildStats(scip::SCIP.SCIPData, heur::FPFWHeuristic, totalTime::Float64)
     if heur.called > 0
+        heur.stats.totalTime = totalTime
         return heur.stats
     end
 
     stats = FPFWStats()
-    stats.primalBound = normalizeInf(Float64(SCIP.SCIPgetPrimalbound(scip)))
-    stats.dualBound = normalizeInf(Float64(SCIP.SCIPgetDualbound(scip)))
-    stats.gap = normalizeInf(Float64(SCIP.SCIPgetGap(scip)))
+    stats.primalBound = Float64(SCIP.SCIPgetPrimalbound(scip))
+    stats.dualBound = Float64(SCIP.SCIPgetDualbound(scip))
+    stats.gap = Float64(SCIP.SCIPgetGap(scip))
 
     stats.totalTime = totalTime
     stats.solutionFound = SCIP.SCIPgetNSols(scip) > 0
@@ -90,14 +91,10 @@ function printResults(stats::FPFWStats)
         "unknown exit"
     end
 
-    primalBound = isinf(stats.primalBound) ? "Inf" : "$(round(stats.primalBound, digits=4))"
-    dualBound = isinf(stats.dualBound) ? "Inf" : "$(round(stats.dualBound, digits=4))"
-    gap = isinf(stats.gap) ? "Inf" : @sprintf("%.2f %%", stats.gap * 100)
-
     printstyled("[result]\n", color=:cyan)
-    println("primalBound = $primalBound")
-    println("dualBound = $dualBound")
-    println("gap = $gap")
+    println("primalBound = $(round(stats.primalBound, digits=4))")
+    println("dualBound = $(round(stats.dualBound, digits=4))")
+    println("gap = $(@sprintf("%.2f %%", stats.gap * 100))")
     println("totalTime = $(round(stats.totalTime, digits=2))s")
     println("solFound = $(stats.solutionFound)")
 
@@ -149,16 +146,6 @@ function areSolutionsEqual(intIdx::Vector{Int}, x1::Vector{Float64}, x2::Vector{
         end
     end
     return true
-end
-
-function normalizeInf(x::Float64)
-    if x > 1e15
-        return Inf
-    elseif x < -1e15
-        return -Inf
-    else
-        return x
-    end
 end
 
 function countFracVars(intIdx::Vector{Int},x::Vector{Float64}, tol::Float64=DEF_INT_TOLERANCE)
