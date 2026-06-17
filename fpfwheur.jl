@@ -74,7 +74,7 @@ function SCIP.find_primal_solution(
     # TODO: store the best solution found across iterations, not just the first one
     foundSolution = nothing
 
-    f, grad! = buildFWFunctions(heur.config.norm, intIdx)
+    f, grad!, dist = buildFWFunctions(heur.config.norm, intIdx, xRound)
 
     # FW step trajectory within one FP iteration: (step, x, objective)
     fwTraj = Vector{Tuple{Int, Vector{Float64}, Float64}}()
@@ -100,8 +100,8 @@ function SCIP.find_primal_solution(
                 fwEscaped = true    
                 
                 obj = sum(xAfter[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lpCols[j])) for j in 1:nvars)
-                step = f(xAfter, xPrev)
-                intGap = f(xAfter, xRound)
+                step = dist(xAfter, xPrev)
+                intGap = f(xAfter)
                 nFrac = count(i -> abs(xAfter[i] - round(xAfter[i])) > DEF_INT_TOLERANCE, intIdx)
                 escFwIters = state.t
                 iterTime = timeElapsed(iterStartTime)
@@ -295,8 +295,8 @@ function SCIP.find_primal_solution(
 
         fwResult = run_fw(
             heur.config.fwVariant,
-            x -> f(x, xRound),
-            (storage, x) -> grad!(storage, x, xRound),
+            f,
+            grad!,
             heur.lmo,
             x,
             activeSet,
@@ -306,7 +306,7 @@ function SCIP.find_primal_solution(
             remainingTime
         )
 
-        heur.stats.fwTime += elapsedTime(fwStartTime)
+        heur.stats.fwTime += timeElapsed(fwStartTime)
         fwIters = length(fwTraj)
         heur.stats.fwIterations += fwIters
 
@@ -323,7 +323,7 @@ function SCIP.find_primal_solution(
         end
 
         # Cycle detection: check if we've visited this solution before
-        intGap = f(xNew, xRound)
+        intGap = f(xNew)
 
         if heur.config.lineSearch != :unitary
             if isLowerThan(intGap, bestIntGap)
@@ -351,9 +351,9 @@ function SCIP.find_primal_solution(
         isFeasible = isSolutionLPFeasible(scip, lpRows, lpCols, xNew, colDict)
 
         obj = sum(xNew[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lpCols[j])) for j in 1:nvars)
-        step = f(xNew, xPrev)
+        step = dist(xNew, xPrev)
         nFrac = count(i -> abs(xNew[i] - round(xNew[i])) > DEF_INT_TOLERANCE, intIdx)
-        iterTime = elapsedTime(iterStartTime)
+        iterTime = timeElapsed(iterStartTime)
 
         flag = restarted ? "restart" : ""
 

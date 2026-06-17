@@ -28,11 +28,11 @@ function callFWVariant(variant::Symbol, f, grad!, lmo, activeSet::FrankWolfe.Act
     end
 end
 
-function buildFWFunctions(norm::Symbol, intIdx::Vector{Int})
+function buildFWFunctions(norm::Symbol, intIdx::Vector{Int}, xRound::Vector{Float64})
     if norm == :manhattan
-        f = (x, xRound) -> sum(abs(x[i] - xRound[i]) for i in intIdx)
+        f = x -> sum(abs(x[i] - xRound[i]) for i in intIdx)
 
-        grad! = (storage, x, xRound) -> begin
+        grad! = (storage, x) -> begin
             storage .= 0.0
             for i in intIdx
                 d = x[i] - xRound[i]
@@ -41,11 +41,13 @@ function buildFWFunctions(norm::Symbol, intIdx::Vector{Int})
             return storage
         end
 
+        dist = (x, y) -> sum(abs(x[i] - y[i]) for i in intIdx)
+
     # check
     elseif norm == :smoothManhattan
-        f = (x, xRound) -> sum(sqrt((x[i] - xRound[i])^2 + DEF_INT_TOLERANCE) for i in intIdx)
+        f = x -> sum(sqrt((x[i] - xRound[i])^2 + DEF_INT_TOLERANCE) for i in intIdx)
 
-        grad! = (storage, x, xRound) -> begin
+        grad! = (storage, x) -> begin
             storage .= 0.0
             for i in intIdx
                 d = x[i] - xRound[i]
@@ -54,10 +56,12 @@ function buildFWFunctions(norm::Symbol, intIdx::Vector{Int})
             return storage
         end
 
-    elseif norm == :euclidean
-        f = (x, xRound) -> 0.5 * sum((x[i] - xRound[i])^2 for i in intIdx)
+        dist = (x, y) -> sum(sqrt((x[i] - y[i])^2 + DEF_INT_TOLERANCE) for i in intIdx)
 
-        grad! = (storage, x, xRound) -> begin
+    elseif norm == :euclidean
+        f = x -> 0.5 * sum((x[i] - xRound[i])^2 for i in intIdx)
+
+        grad! = (storage, x) -> begin
             storage .= 0.0
             for i in intIdx
                 storage[i] = x[i] - xRound[i]
@@ -65,11 +69,13 @@ function buildFWFunctions(norm::Symbol, intIdx::Vector{Int})
             return storage
         end
 
+        dist = (x, y) -> 0.5 * sum((x[i] - y[i])^2 for i in intIdx)
+
     else
         error("Unknown norm: $norm. Choose from :euclidean, :manhattan, :smoothManhattan")
     end
 
-    return f, grad!
+    return f, grad!, dist
 end
 
 function buildLineSearch(lineSearch::Symbol)
