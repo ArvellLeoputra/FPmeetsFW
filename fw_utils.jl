@@ -35,8 +35,7 @@ function buildFWFunctions(norm::Symbol, intIdx::Vector{Int}, xRound::Vector{Floa
         grad! = (storage, x) -> begin
             storage .= 0.0
             for i in intIdx
-                d = x[i] - xRound[i]
-                storage[i] = d > 0 ? 1.0 : d < 0 ? -1.0 : 0.0
+                storage[i] = x[i] < 0.5 ? 1.0 : -1.0
             end
             return storage
         end
