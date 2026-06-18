@@ -48,7 +48,6 @@ function SCIP.find_primal_solution(
         end        
     end
 
-    # Main Feasibility Pump with Frank-Wolfe Loop
     x = copy(initSol)       # Initial LP feasible solution
     xPrev = copy(initSol)   # To calculate distance moved
     xRound = zeros(Float64, nvars)  # Preallocated buffer for rounding target
@@ -96,7 +95,7 @@ function SCIP.find_primal_solution(
         # If so, stop FW early and use xAfter as the new starting point
         if DEF_FW_ESCAPE
             roundSolution!(xRoundEscape, xAfter, intIdx, heur.config.randRound)
-            if areSolutionsEqual(intIdx, xRoundEscape, xRound)
+            if !areSolutionsEqual(intIdx, xRoundEscape, xRound)
                 fwEscaped = true    
                 
                 obj = sum(xAfter[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lpCols[j])) for j in 1:nvars)
@@ -167,6 +166,7 @@ function SCIP.find_primal_solution(
                     heur.stats.solutionFound = true
                     heur.stats.exitReason = :rr_solution_found
                     result = SCIP.SCIP_FOUNDSOL
+                    push!(heur.stats.primalEvents, (timeElapsed(heurStartTime), min(1.0, Float64(SCIP.SCIPgetGap(scip)))))
 
                     if DEBUG_VERBOSE
                         println("End solution:")
@@ -218,6 +218,7 @@ function SCIP.find_primal_solution(
 
                 Random.seed!(heur.config.seed + heur.stats.restartCount)
                 perturbSolution!(x, xRound, binIdx, gIntIdx, lpCols)
+                empty!(visitedRounded)
                 h = hashSolution(xRound, intIdx)
 
                 if DEBUG_VERBOSE
@@ -261,6 +262,8 @@ function SCIP.find_primal_solution(
             heur.stats.solutionFound = true
             heur.stats.exitReason = :solution_found
             result = SCIP.SCIP_FOUNDSOL
+            push!(heur.stats.primalEvents, (timeElapsed(heurStartTime), min(1.0, Float64(SCIP.SCIPgetGap(scip)))))
+
             obj = sum(xRound[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lpCols[j])) for j in 1:nvars)
             iterTime = timeElapsed(iterStartTime)
             if !DEBUG_VERBOSE
@@ -269,16 +272,18 @@ function SCIP.find_primal_solution(
             break
         end
 
-        feasible, sol = lpDiving!(scip, lpCols, intIdx, xRound, nvars)
+        feasible, sol = subMIPsolve(scip, lpCols, intIdx, xRound, nvars)
         if feasible
             if submitSolution(scip, heur_ptr, lpCols, sol, nvars)
                 heur.stats.solutionFound = true
                 heur.stats.exitReason = :solution_found
                 result = SCIP.SCIP_FOUNDSOL
+                push!(heur.stats.primalEvents, (timeElapsed(heurStartTime), min(1.0, Float64(SCIP.SCIPgetGap(scip)))))
+
                 obj = sum(sol[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lpCols[j])) for j in 1:nvars)
                 iterTime = timeElapsed(iterStartTime)
                 if !DEBUG_VERBOSE
-                    printRow!(pumpDisplay, heur.stats.pumpIterations, obj, 0.0, NaN, 0, 0, iterTime, restarted ? "restart+divingLP" : "divingLP")
+                    printRow!(pumpDisplay, heur.stats.pumpIterations, obj, 0.0, NaN, 0, 0, iterTime, restarted ? "restart+subMIPsolve" : "subMIPsolve")
                 end
                 break
             end
@@ -372,6 +377,7 @@ function SCIP.find_primal_solution(
                 heur.stats.solutionFound = true
                 heur.stats.exitReason = :solution_found
                 result = SCIP.SCIP_FOUNDSOL
+                push!(heur.stats.primalEvents, (timeElapsed(heurStartTime), min(1.0, Float64(SCIP.SCIPgetGap(scip)))))
 
                 if DEBUG_VERBOSE
                     println("End solution:")

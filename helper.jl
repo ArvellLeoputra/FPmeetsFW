@@ -5,6 +5,7 @@ end
 function buildStats(scip::SCIP.SCIPData, heur::FPFWHeuristic, totalTime::Float64)
     if heur.called > 0
         heur.stats.totalTime = totalTime
+        heur.stats.primalIntegral = computePrimalIntegral(heur.stats.primalEvents, totalTime)
         return heur.stats
     end
 
@@ -30,6 +31,8 @@ function buildStats(scip::SCIP.SCIPData, heur::FPFWHeuristic, totalTime::Float64
     else
         stats.exitReason = :scip_unknown
     end
+
+    stats.primalIntegral = computePrimalIntegral(heur.stats.primalEvents, totalTime)
 
     return stats
 end
@@ -95,6 +98,7 @@ function printResults(stats::FPFWStats)
     println("primalBound = $(round(stats.primalBound, digits=4))")
     println("dualBound = $(round(stats.dualBound, digits=4))")
     println("gap = $(@sprintf("%.2f %%", stats.gap * 100))")
+    println("primalIntegral = $(round(stats.primalIntegral, digits=4))")
     println("totalTime = $(round(stats.totalTime, digits=2))s")
     println("solFound = $(stats.solutionFound)")
 
@@ -183,6 +187,21 @@ function getLPData(scip::Ptr{SCIP.SCIP_}, nvars::Int32, nrows::Int32)
     return lpCols, lpRows, colDict, binIdx, intIdx, initSol
 end
 
+function computePrimalIntegral(events::Vector{Tuple{Float64, Float64}}, totalTime::Float64)
+    integral = 0.0
+    prevTime = 0.0
+    prevGap  = 1.0
+
+    for (t, gap) in events
+        integral += prevGap * (t - prevTime)
+        prevTime = t
+        prevGap = gap
+    end
+
+    integral += prevGap * (totalTime - prevTime)
+    return integral
+end
+
 # Rounding threshold generator
 function getRoundingThreshold(random::Bool)
     return random ? rand() : 0.5
@@ -229,7 +248,7 @@ function perturbSolution!(x::Vector{Float64}, xRound::Vector{Float64}, binIdx::V
     end
 end
 
-function lpDiving!(scip::Ptr{SCIP.SCIP_}, lpCols::Vector{Ptr{SCIP.SCIP_COL}}, intIdx::Vector{Int}, xRound::Vector{Float64}, nvars::Int32)::Tuple{Bool, Vector{Float64}}
+function subMIPsolve(scip::Ptr{SCIP.SCIP_}, lpCols::Vector{Ptr{SCIP.SCIP_COL}}, intIdx::Vector{Int}, xRound::Vector{Float64}, nvars::Int32)::Tuple{Bool, Vector{Float64}}
     SCIP.SCIPstartDive(scip)
     
     try

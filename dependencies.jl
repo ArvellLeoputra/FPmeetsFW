@@ -23,6 +23,8 @@ mutable struct FPFWStats
     primalBound::Float64
     dualBound::Float64
     gap::Float64
+    primalIntegral::Float64
+    primalEvents::Vector{Tuple{Float64, Float64}}
     totalTime::Float64
     heurTime::Float64
     rrTime::Float64
@@ -33,7 +35,7 @@ mutable struct FPFWStats
     solutionFound::Bool
     exitReason::Symbol  # :none, :time_limit, :restart_limit, :infeasible_fw, :solution_found, :rr_solution_found, :scip_optimal, :scip_infeasible, :scip_time_limit, :scip_node_limit, :scip_unbounded, :scip_unknown
 
-    FPFWStats() = new(Inf, Inf, Inf, 0.0, 0.0, 0.0, 0.0, 0, 0, 0, false, :none)
+    FPFWStats() = new(Inf, Inf, Inf, 0.0, Tuple{Float64,Float64}[], 0.0, 0.0, 0.0, 0.0, 0, 0, 0, false, :none)
 end
 
 mutable struct FPFWHeuristic <: SCIP.Heuristic

@@ -34,8 +34,17 @@ function buildFWFunctions(norm::Symbol, intIdx::Vector{Int}, xRound::Vector{Floa
 
         grad! = (storage, x) -> begin
             storage .= 0.0
+            # Currently, only works for binary
+            # TODO: General integer case
             for i in intIdx
-                storage[i] = x[i] < 0.5 ? 1.0 : -1.0
+                d = x[i] - xRound[i]
+                if d > 0
+                    storage[i] = 1.0
+                elseif d < 0
+                    storage[i] = -1.0
+                else
+                    storage[i] = xRound[i] < 0.5 ? 1.0 : -1.0
+                end
             end
             return storage
         end
