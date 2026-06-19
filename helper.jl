@@ -72,8 +72,6 @@ end
 function printResults(stats::FPFWStats)
     exitMsg = if stats.exitReason == :time_limit
         "pump time limit $(DEF_PUMP_TIME_LIMIT)s reached"
-    elseif stats.exitReason == :restart_limit
-        "FP cycled $(DEF_MAX_RESTARTS) times without progress"
     elseif stats.exitReason == :infeasible_fw
         "FW returned a point outside the feasible polytope (numerical error)"
     elseif stats.exitReason == :solution_found
@@ -108,6 +106,7 @@ function printResults(stats::FPFWStats)
         println("randRoundTime = $(round(stats.rrTime, digits=2))s")
         println("pumpIterations = $(stats.pumpIterations)")
         println("fwIterations = $(stats.fwIterations)")
+        println("perturbCount = $(stats.perturbCount)")
         println("restartCount = $(stats.restartCount)")
     end
 
@@ -215,19 +214,73 @@ function roundSolution!(xRound::Vector{Float64}, x::Vector{Float64}, intIdx::Vec
 end
 
 # Hash function for cycle detection (only hashes integer variable values)
-function hashSolution(x::Vector{Float64}, intIdx::Vector{Int})
+function hashRounded(x::Vector{Float64}, intIdx::Vector{Int})
     hash(tuple((x[i] for i in intIdx)...))
 end
 
-function perturbSolution!(x::Vector{Float64}, xRound::Vector{Float64}, binIdx::Vector{Int}, gIntIdx::Vector{Int}, lpCols::Vector{Ptr{SCIP.SCIP_COL}})
-    for i in binIdx
-        if rand() < DEF_PERTURB_FRACTION
+function perturb(
+    xRound::Vector{Float64},
+    x::Vector{Float64},
+    binIdx::Vector{Int},
+    intIdx::Vector{Int},
+    avgFlips::Int
+)
+    fracVars = [(abs(xRound[i] - x[i]), i) for i in intIdx if !areValuesEqual(xRound[i], x[i])]
+    sort!(fracVars, rev=true)
+
+    nFlips = round(Int, avgFlips * (rand() + 0.5))
+    nFracFlips = clamp(nFlips, 1, length(fracVars))
+
+    binSet = Set(binIdx)  # faster lookup
+    for k in 1:nFracFlips
+        _, i = fracVars[k]
+        if i in binSet  # binary: round to opposite
             xRound[i] = 1.0 - xRound[i]
+        else  # general integer: reverse rounding direction
+            xRound[i] += isLowerThan(xRound[i], x[i]) ? 1.0 : -1.0
+        end
+    end
+end
+
+function restart(
+    xRound::Vector{Float64},
+    x::Vector{Float64},
+    prevRound::Vector{Float64},
+    binIdx::Vector{Int},
+    gIntIdx::Vector{Int},
+    lpCols::Vector{Ptr{SCIP.SCIP_COL}},
+    avgFlips::Int
+)
+    changed = 0
+
+    # Binary variables
+    for i in binIdx
+        r = rand() - 0.47  # [-0.47, 0.53)
+
+        if r > 0 && areValuesEqual(xRound[i], prevRound[i])  # stuck variable
+            sigma = abs(xRound[i] - x[i])
+            if sigma + r > 0.5
+                xRound[i] = 1.0 - xRound[i]
+                changed += 1
+            end
         end
     end
 
-    for i in gIntIdx
-        if rand() < DEF_PERTURB_FRACTION
+    if changed == 0
+        for i in binIdx
+            if rand() > 0.5
+                xRound[i] = 1.0 - xRound[i]
+                changed += 1
+            end
+        end
+    end
+
+    # General integer variables
+    if !isempty(gIntIdx)
+        for _ in 1:avgFlips
+            k = rand(1:length(gIntIdx))
+            i = gIntIdx[k]
+
             var = SCIP.SCIPcolGetVar(lpCols[i])
             lb = SCIP.SCIPvarGetLbLocal(var)
             ub = SCIP.SCIPvarGetUbLocal(var)
@@ -240,10 +293,11 @@ function perturbSolution!(x::Vector{Float64}, xRound::Vector{Float64}, binIdx::V
             elseif (ub - xRound[i]) < DEF_BIGM
                 ub - (2 * DEF_BIGM - 1) * r
             else
-                x[i] + (2 * DEF_BIGM - 1) * r - DEF_BIGM
+                xRound[i] + (2 * DEF_BIGM - 1) * r - DEF_BIGM
             end
 
             xRound[i] = clamp(floor(newVal), lb, ub)
+            changed += 1
         end
     end
 end

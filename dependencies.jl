@@ -31,11 +31,12 @@ mutable struct FPFWStats
     fwTime::Float64
     pumpIterations::Int
     fwIterations::Int
+    perturbCount::Int
     restartCount::Int
     solutionFound::Bool
-    exitReason::Symbol  # :none, :time_limit, :restart_limit, :infeasible_fw, :solution_found, :rr_solution_found, :scip_optimal, :scip_infeasible, :scip_time_limit, :scip_node_limit, :scip_unbounded, :scip_unknown
+    exitReason::Symbol  # :none, :time_limit, :infeasible_fw, :solution_found, :rr_solution_found, :scip_optimal, :scip_infeasible, :scip_time_limit, :scip_node_limit, :scip_unbounded, :scip_unknown
 
-    FPFWStats() = new(Inf, Inf, Inf, 0.0, Tuple{Float64,Float64}[], 0.0, 0.0, 0.0, 0.0, 0, 0, 0, false, :none)
+    FPFWStats() = new(Inf, Inf, Inf, 0.0, Tuple{Float64,Float64}[], 0.0, 0.0, 0.0, 0.0, 0, 0, 0, 0, false, :none)
 end
 
 mutable struct FPFWHeuristic <: SCIP.Heuristic
@@ -69,12 +70,11 @@ const DEF_SCIP_TIME_LIMIT = 300.0
 # FW escape check: check if FW escapes its rounding point
 const DEF_FW_ESCAPE = false
 
-# Perturbation parameters
-const DEF_PERTURB_FRACTION = 0.2   # Fraction of binary vars to flip when cycle detected
-const DEF_MAX_RESTARTS = 1000      # Maximum number of restarts before giving up
-const DEF_MAX_STAGNATION = 3       # Maximum number of iterations without improvement before perturbing
-const DEF_BIGM = 1e9               # Big M constant for cycle-breaking perturbations
-const DEF_BIGBIGM = 1e15           # Bigbig M constant for perturbations
+# Perturbation and restart parameters
+const DEF_MAX_STAGNATION = 3                # Maximum number of iterations without improvement before perturbing
+const DEF_STAGNATION_RESTART_THRESHOLD = 3  # Maximum number of stagnations before restarting
+const DEF_BIGM = 1e9                        # Big M constant for cycle-breaking perturbations
+const DEF_BIGBIGM = 1e15                    # Bigbig M constant for perturbations
 
 # Randomized rounding feasibility check parameters
 const DEF_RAND_FEAS_ITER_LIMIT = 100
