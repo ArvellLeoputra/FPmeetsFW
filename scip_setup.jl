@@ -113,7 +113,7 @@ function set_verbosity!(model::JuMP.Model, level::Int)
 end
 
 function minimal_setup(;
-    time_limit=DEF_SCIP_TIME_LIMIT,
+    time_limit,
     node_limit=1,
     verbosity=0,
     presolve=false
@@ -124,8 +124,8 @@ function minimal_setup(;
     disable_cuts!(model)
     disable_root_node_propagation!(model)
 
-    if !presolve                                                                                                                                                                                                                  
-        disable_presolving!(model)                                                                                                                                                                                              
+    if !presolve
+        disable_presolving!(model)
     end
 
     set_verbosity!(model, verbosity)

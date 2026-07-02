@@ -1,19 +1,19 @@
 function runInstance(fileName::String, config::FPFWConfig)
     printstyled("Timestamp: ", Dates.format(Dates.now(), "yyyy-mm-dd HH:MM:SS"), "\n", color=:cyan)
 
-    startTime = time()
+    globalStartTime = time()
     Random.seed!(config.seed)
 
-    model = minimal_setup(presolve=config.presolve)
+    model = minimal_setup(time_limit=config.timeLimit, presolve=config.presolve)
     backend = JuMP.unsafe_backend(model)
     scip = backend.inner
 
     SCIP.SCIPreadProb(scip, fileName, C_NULL)
 
-    printRunInfo(scip, fileName)
+    printRunInfo(scip)
     printConfigs(config)
 
-    heur = FPFWHeuristic(0, nothing, config, FPFWStats())
+    heur = FPFWHeuristic(config, FPFWRunData())
     SCIP.include_heuristic(
         backend,
         heur,
@@ -23,7 +23,7 @@ function runInstance(fileName::String, config::FPFWConfig)
     )
     SCIP.SCIPsolve(scip)
 
-    totalTime = timeElapsed(startTime)
+    totalTime = timeElapsed(globalStartTime)
 
     stats = buildStats(scip, heur, totalTime)
     printResults(stats)

@@ -15,7 +15,7 @@ function parseCfgFile(path::String)
 end
 
 function buildConfig(params::Dict{String, String})
-    inputs = ["norm", "fwVariant", "fwLineSearch", "randomizedRounding", "randomFeasibilityCheck", "warmStart", "presolve", "seed"]
+    inputs = ["norm", "fwVariant", "fwLineSearch", "timeLimit", "randomizedRounding", "randomFeasibilityCheck", "warmStart", "presolve", "seed"]
     for input in inputs
         if !haskey(params, input)
             error("Missing key '$input' in fpfw.cfg or CLI args")
@@ -25,6 +25,7 @@ function buildConfig(params::Dict{String, String})
     norm = Symbol(params["norm"])
     fwVariant = Symbol(params["fwVariant"])
     fwLineSearch = Symbol(params["fwLineSearch"])
+    timeLimit = parse(Float64, params["timeLimit"])
     randRound = parse(Bool, params["randomizedRounding"])
     randFeasCheck = parse(Bool, params["randomFeasibilityCheck"])
     warmStart = parse(Bool, params["warmStart"])
@@ -47,7 +48,7 @@ function buildConfig(params::Dict{String, String})
         error("manhattan norm requires a smooth objective — use agnostic or unitary instead")
     end
 
-    return FPFWConfig(norm, fwVariant, fwLineSearch, randRound, randFeasCheck, warmStart, presolve, seed)
+    return FPFWConfig(norm, fwVariant, fwLineSearch, timeLimit, randRound, randFeasCheck, warmStart, presolve, seed)
 end
 
 function loadConfig(args::Vector{String})

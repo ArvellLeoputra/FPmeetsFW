@@ -1,4 +1,4 @@
-NAME
+NAME          test2
 ROWS
  N  OBJ
  L  c1_1

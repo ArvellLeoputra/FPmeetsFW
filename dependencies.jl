@@ -12,6 +12,7 @@ struct FPFWConfig
     norm::Symbol
     fwVariant::Symbol
     lineSearch::Symbol
+    timeLimit::Float64
     randRound::Bool
     randFeasCheck::Bool
     warmStart::Bool
@@ -39,11 +40,22 @@ mutable struct FPFWStats
     FPFWStats() = new(Inf, Inf, Inf, 0.0, Tuple{Float64,Float64}[], 0.0, 0.0, 0.0, 0.0, 0, 0, 0, 0, false, :none)
 end
 
-mutable struct FPFWHeuristic <: SCIP.Heuristic
+mutable struct BaseLMO <: FrankWolfe.LinearMinimizationOracle
+    lpi::Ptr{SCIP.SCIP_LPI}
+    ncols::Int
+end
+
+mutable struct FPFWRunData
     called::Int64
-    lmo::Union{Nothing, FrankWolfe.MathOptLMO}
-    config::FPFWConfig
+    lmo::Union{Nothing, FrankWolfe.MathOptLMO, BaseLMO}
     stats::FPFWStats
+
+    FPFWRunData() = new(0, nothing, FPFWStats())
+end
+
+mutable struct FPFWHeuristic <: SCIP.Heuristic
+    config::FPFWConfig
+    data::FPFWRunData
 end
 
 mutable struct PumpDisplayColumn
@@ -62,10 +74,6 @@ const DEF_FW_TOLERANCE = 1e-7
 
 # Iteration parameters
 const DEF_FW_MAX_ITER = 1
-
-# Time limit
-const DEF_PUMP_TIME_LIMIT = 300.0
-const DEF_SCIP_TIME_LIMIT = 300.0
 
 # FW escape check: check if FW escapes its rounding point
 const DEF_FW_ESCAPE = false
