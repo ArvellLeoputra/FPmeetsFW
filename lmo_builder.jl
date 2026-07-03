@@ -74,7 +74,6 @@ function buildLPILMO(
     ncols::Int32,
     nrows::Int32
 )
-
     lmoStart = time()
 
     # Create SCIPlpi instance
@@ -96,7 +95,7 @@ function buildLPILMO(
     end
 
     # Add columns
-    SCIP.SCIPlpiAddCols(
+    SCIP.@SCIP_CALL SCIP.SCIPlpiAddCols(
         lpi,
         Cint(ncols),
         obj,
@@ -123,26 +122,28 @@ function buildLPILMO(
         rhs = SCIP.SCIProwGetRhs(row) - constant
         push!(lhsVec, lhs < -inf ? -inf : lhs)
         push!(rhsVec, rhs > inf ? inf : rhs)
-        push!(begVec, Cint(offset))
+        push!(begVec, offset)
 
         nnonz = SCIP.SCIProwGetNNonz(row)
-        rowCols = unsafe_wrap(Vector{Ptr{SCIP.SCIP_COL}}, SCIP.SCIProwGetCols(row), nnonz)
-        rowVals = unsafe_wrap(Vector{SCIP.SCIP_Real}, SCIP.SCIProwGetVals(row), nnonz)
-        for k in 1:nnonz
-            push!(nonzIdx, Cint(colDict[rowCols[k]] - 1))
-            push!(nonzVals, rowVals[k])
+        if nnonz > 0    
+            rowCols = unsafe_wrap(Vector{Ptr{SCIP.SCIP_COL}}, SCIP.SCIProwGetCols(row), nnonz)
+            rowVals = unsafe_wrap(Vector{SCIP.SCIP_Real}, SCIP.SCIProwGetVals(row), nnonz)
+            for k in 1:nnonz
+                push!(nonzIdx, Cint(colDict[rowCols[k]] - 1))
+                push!(nonzVals, rowVals[k])
+            end
+            offset += nnonz
         end
-        offset += nnonz
     end
 
     # Add rows
-    SCIP.SCIPlpiAddRows(
+    SCIP.@SCIP_CALL SCIP.SCIPlpiAddRows(
         lpi,
-        Cint(nrows),
+        nrows,
         lhsVec,
         rhsVec,
         C_NULL,
-        Cint(offset),
+        offset,
         begVec,
         nonzIdx,
         nonzVals
@@ -158,11 +159,11 @@ function buildLPILMO(
     @assert ncols_ref[] == ncols "LPI ncols $(ncols_ref[]) != ncols $ncols"
     @assert nrows_ref[] == nrows "LPI nrows $(nrows_ref[]) != nrows $nrows"
 
-    return BaseLMO(lpi, Int(ncols))
+    return BaseLMO(lpi, ncols, nrows)
 end
 
 # Extract LP basis from SCIP's internal LP solver
-function LPIgetBase(scip::Ptr{SCIP.SCIP_}, ncols, nrows)
+function LPIgetBase(scip::Ptr{SCIP.SCIP_}, ncols::Int32, nrows::Int32)
     # Get SCIP's internal LP handle
     lpiPtr = Ref{Ptr{SCIP.SCIP_LPI}}(C_NULL)
     SCIP.@SCIP_CALL SCIP.SCIPgetLPI(scip, lpiPtr)
@@ -188,12 +189,13 @@ function LPIgetBase(scip::Ptr{SCIP.SCIP_}, ncols, nrows)
 end
 
 # Set LP basis
-function LPIsetBase(lmo::BaseLMO, cstat, rstat)
+function LPIsetBase(lmo::BaseLMO, cstat::Vector{Cint}, rstat::Vector{Cint})
     SCIP.@SCIP_CALL SCIP.SCIPlpiSetBase(lmo.lpi, cstat, rstat)
 end
 
-function LPIinitBase(scip::Ptr{SCIP.SCIP_}, lmo::BaseLMO, nrows)
-    cstat, rstat = LPIgetBase(scip, lmo.ncols, nrows)
+# Initialize LMO basis from SCIP's internal LP basis
+function LPIinitBase(scip::Ptr{SCIP.SCIP_}, lmo::BaseLMO)
+    cstat, rstat = LPIgetBase(scip, lmo.ncols, lmo.nrows)
     LPIsetBase(lmo, cstat, rstat)
 end
 
@@ -205,12 +207,6 @@ function FrankWolfe.compute_extreme_point(lmo::BaseLMO, direction::AbstractVecto
         [Cint(i) for i in 0:(lmo.ncols - 1)],
         Vector{Cdouble}(direction)
     )
-
-    if DEBUG_VERBOSE
-        vals = zeros(Cdouble, lmo.ncols)
-        SCIP.SCIPlpiGetObj(lmo.lpi, Cint(0), Cint(lmo.ncols - 1), vals)
-        nonzero = [(i, vals[i]) for i in 1:lmo.ncols if vals[i] != 0.0]
-    end
 
     # Check current basis statuses
     if DEBUG_VERBOSE

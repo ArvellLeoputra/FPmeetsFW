@@ -15,7 +15,7 @@ function parseCfgFile(path::String)
 end
 
 function buildConfig(params::Dict{String, String})
-    inputs = ["norm", "fwVariant", "fwLineSearch", "timeLimit", "randomizedRounding", "randomFeasibilityCheck", "warmStart", "presolve", "seed"]
+    inputs = ["norm", "fwVariant", "fwLineSearch", "timeLimit", "randomizedRounding", "randomFeasibilityCheck", "fwWarmStart", "lmoWarmStart", "useSubMIP", "presolve", "seed"]
     for input in inputs
         if !haskey(params, input)
             error("Missing key '$input' in fpfw.cfg or CLI args")
@@ -28,7 +28,9 @@ function buildConfig(params::Dict{String, String})
     timeLimit = parse(Float64, params["timeLimit"])
     randRound = parse(Bool, params["randomizedRounding"])
     randFeasCheck = parse(Bool, params["randomFeasibilityCheck"])
-    warmStart = parse(Bool, params["warmStart"])
+    fwWarmStart = parse(Bool, params["fwWarmStart"])
+    lmoWarmStart = parse(Bool, params["lmoWarmStart"])
+    useSubMIP = parse(Bool, params["useSubMIP"])
     presolve = parse(Bool, params["presolve"])
     seed = parse(Int, params["seed"])
 
@@ -48,7 +50,7 @@ function buildConfig(params::Dict{String, String})
         error("manhattan norm requires a smooth objective — use agnostic or unitary instead")
     end
 
-    return FPFWConfig(norm, fwVariant, fwLineSearch, timeLimit, randRound, randFeasCheck, warmStart, presolve, seed)
+    return FPFWConfig(norm, fwVariant, fwLineSearch, timeLimit, randRound, randFeasCheck, fwWarmStart, lmoWarmStart, useSubMIP, presolve, seed)
 end
 
 function loadConfig(args::Vector{String})

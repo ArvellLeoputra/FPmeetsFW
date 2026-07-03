@@ -15,7 +15,9 @@ struct FPFWConfig
     timeLimit::Float64
     randRound::Bool
     randFeasCheck::Bool
-    warmStart::Bool
+    fwWarmStart::Bool
+    lmoWarmStart::Bool
+    useSubMIP::Bool
     presolve::Bool
     seed::Int
 end
@@ -40,9 +42,10 @@ mutable struct FPFWStats
     FPFWStats() = new(Inf, Inf, Inf, 0.0, Tuple{Float64,Float64}[], 0.0, 0.0, 0.0, 0.0, 0, 0, 0, 0, false, :none)
 end
 
-mutable struct BaseLMO <: FrankWolfe.LinearMinimizationOracle
+struct BaseLMO <: FrankWolfe.LinearMinimizationOracle
     lpi::Ptr{SCIP.SCIP_LPI}
-    ncols::Int
+    ncols::Int32
+    nrows::Int32
 end
 
 mutable struct FPFWRunData

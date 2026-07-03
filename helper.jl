@@ -60,7 +60,9 @@ function printConfigs(config::FPFWConfig)
     println("timeLimit = $(config.timeLimit)")
     println("randomizedRounding = $(config.randRound ? "enabled" : "disabled")")
     println("randomizedFeasibilityCheck = $(config.randFeasCheck ? "enabled" : "disabled")")
-    println("warmStart = $(config.warmStart ? "enabled" : "disabled")")
+    println("fwWarmStart = $(config.fwWarmStart ? "enabled" : "disabled")")
+    println("lmoWarmStart = $(config.lmoWarmStart ? "enabled" : "disabled")")
+    println("useSubMIP = $(config.useSubMIP ? "enabled" : "disabled")")
     println("presolve = $(config.presolve ? "enabled" : "disabled")")
     println("seed = $(config.seed)")
 end
@@ -223,8 +225,6 @@ function perturb(
     if DEBUG_VERBOSE
         println("Perturbing $nFracFlips integer variables (out of $(length(fracVars)) fractional variables)")
     end
-    
-    prev_xRound = copy(xRound)
 
     binSet = Set(binIdx)  # faster lookup
     for k in 1:nFracFlips
@@ -234,11 +234,6 @@ function perturb(
         else  # general integer: reverse rounding direction
             xRound[i] += SCIP.SCIPisLT(scip, xRound[i], x[i]) == SCIP.TRUE ? 1.0 : -1.0
         end
-    end
-
-    if DEBUG_VERBOSE
-        changed = [(i, xRound[i]) for i in intIdx if xRound[i] != prev_xRound[i]]
-        println("Perturbed vars: $changed")
     end
 end
 
@@ -303,6 +298,8 @@ function restart(
     end
 end
 
+# Fix integer variables to xRound and solve the LP to adjust continuous variables
+# Fallback when xRound alone is not accepted as a feasible MIP solution
 function subMIPsolve(
     scip::Ptr{SCIP.SCIP_},
     lpCols::Vector{Ptr{SCIP.SCIP_COL}},
@@ -347,7 +344,7 @@ function isSolutionLPFeasible(
     lpCols::Vector{Ptr{SCIP.SCIP_COL}},
     sol::Vector{Float64},
     colDict::Dict{Ptr{SCIP.SCIP_COL}, Int},
-)
+)::Bool
     # Check bounds
     for j in 1:length(lpCols)
         var = SCIP.SCIPcolGetVar(lpCols[j])

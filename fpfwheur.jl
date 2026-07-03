@@ -36,20 +36,21 @@ function SCIP.find_primal_solution(
     @printf("Initial LP: lpiter=%d obj=%.2f frac=%d/%d time=%.2fs\n", 
             lpRootIter, stats.dualBound, nFracVars, length(intIdx), scipTime)
 
-    # Basis data
-    cstat = Cint[]
-    rstat = Cint[]
+
 
     # Build LMO from current LP
     if data.lmo === nothing
-        # data.lmo = SCIPbuildLMO(scip, lpCols, lpRows, colDict, ncols, nrows)
-        data.lmo = buildLPILMO(scip, lpCols, lpRows, colDict, ncols, nrows)
-        LPIinitBase(scip, data.lmo, nrows)
-        cstat, rstat = LPIgetBase(scip, ncols, nrows)
+        if config.lmoWarmStart
+            data.lmo = buildLPILMO(scip, lpCols, lpRows, colDict, ncols, nrows)
+            LPIinitBase(scip, data.lmo)
+        else
+            data.lmo = SCIPbuildLMO(scip, lpCols, lpRows, colDict, ncols, nrows)
+        end
     end
 
     if DEBUG_VERBOSE
         printstyled("[debug info]\n", color=:yellow)
+        cstat, rstat = LPIgetBase(scip, ncols, nrows)
         @printf("Initial basis: cstat L=%d B=%d U=%d | rstat L=%d B=%d U=%d\n",
             count(==(0), cstat), count(==(1), cstat), count(==(2), cstat),
             count(==(0), rstat), count(==(1), rstat), count(==(2), rstat))
@@ -89,8 +90,7 @@ function SCIP.find_primal_solution(
 
     f, grad!, dist = buildFWFunctions(config.norm, intIdx, xRound)
 
-    # FW step trajectory within one FP iteration: (step, x, objective)
-    fwTraj = Vector{Tuple{Int, Vector{Float64}, Float64}}()
+    fwStepCount = 0
     fwCallback = (state, args...) -> begin
         # Skip FW bookkeeping steps where d and gamma are not meaningful
         if state.step_type === FrankWolfe.ST_LAST || state.step_type === FrankWolfe.ST_POSTPROCESS
@@ -101,9 +101,8 @@ function SCIP.find_primal_solution(
             return true
         end
 
-        # Compute next iterate and log it
         xAfter .= state.x .- state.gamma .* state.d
-        push!(fwTraj, (state.t, copy(xAfter), state.primal))
+        fwStepCount += 1
 
         # Check if xAfter rounds to a different target than xRound
         # If so, stop FW early and use xAfter as the new starting point
@@ -115,7 +114,7 @@ function SCIP.find_primal_solution(
                 obj = sum(xAfter[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lpCols[j])) for j in 1:ncols)
                 step = dist(xAfter, xPrev)
                 intGap = f(xAfter)
-                nFrac = count(i -> abs(xAfter[i] - round(xAfter[i])) > DEF_INT_TOLERANCE, intIdx)
+                nFrac = countFracVars(scip, intIdx, xAfter)
                 escFwIters = state.t
                 iterTime = timeElapsed(iterStartTime)
 
@@ -207,21 +206,23 @@ function SCIP.find_primal_solution(
             if h == prevHash
                 perturbed = true
                 stats.perturbCount += 1
-                perturb(scip, xRound, x, binIdx, intIdx, avgFlips)
-
+                
                 if DEBUG_VERBOSE
                     println("Cycle detected at iteration $(stats.pumpIterations) (perturb #$(stats.perturbCount))")
                 end
+                
+                perturb(scip, xRound, x, binIdx, intIdx, avgFlips)
 
             elseif h in visitedRounded
                 restarted = true
                 stats.restartCount += 1
-                restart(scip, xRound, x, prevRound, binIdx, gIntIdx, lpCols, avgFlips)
-                empty!(visitedRounded)
 
                 if DEBUG_VERBOSE
                     println("Cycle detected at iteration $(stats.pumpIterations) (restart #$(stats.restartCount))")
                 end
+                
+                restart(scip, xRound, x, prevRound, binIdx, gIntIdx, lpCols, avgFlips)
+                empty!(visitedRounded)
             end
 
             h = hashRounded(xRound, intIdx)
@@ -271,26 +272,27 @@ function SCIP.find_primal_solution(
             break
         end
 
-        feasible, sol = subMIPsolve(scip, lpCols, intIdx, xRound, ncols)
-        if feasible
-            if submitSolution(scip, heur_ptr, lpCols, sol, ncols)
-                stats.solutionFound = true
-                stats.exitReason = :solution_found
-                result = SCIP.SCIP_FOUNDSOL
-                push!(stats.primalEvents, (timeElapsed(heurStartTime), min(1.0, Float64(SCIP.SCIPgetGap(scip)))))
+        if config.useSubMIP
+            feasible, sol = subMIPsolve(scip, lpCols, intIdx, xRound, ncols)
+            if feasible
+                if submitSolution(scip, heur_ptr, lpCols, sol, ncols)
+                    stats.solutionFound = true
+                    stats.exitReason = :solution_found
+                    result = SCIP.SCIP_FOUNDSOL
+                    push!(stats.primalEvents, (timeElapsed(heurStartTime), min(1.0, Float64(SCIP.SCIPgetGap(scip)))))
 
-                obj = sum(sol[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lpCols[j])) for j in 1:ncols)
-                iterTime = timeElapsed(iterStartTime)
-                if !DEBUG_VERBOSE
-                    printRow!(pumpDisplay, stats.pumpIterations, obj, 0.0, NaN, 0, 0, iterTime, restarted ? "restarted+subMIPsolve" : perturbed ? "perturbed+subMIPsolve" : "subMIPsolve")
+                    obj = sum(sol[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lpCols[j])) for j in 1:ncols)
+                    iterTime = timeElapsed(iterStartTime)
+                    if !DEBUG_VERBOSE
+                        printRow!(pumpDisplay, stats.pumpIterations, obj, 0.0, NaN, 0, 0, iterTime, restarted ? "restarted+subMIPsolve" : perturbed ? "perturbed+subMIPsolve" : "subMIPsolve")
+                    end
+                    break
                 end
-                break
             end
         end
 
-        # Reset FW escape flag and trajectory
         fwEscaped = false
-        empty!(fwTraj)
+        fwStepCount = 0
 
         # Step 2: "Projection" using Frank-Wolfe
         remainingTime = heurTimeLimit - (timeElapsed(heurStartTime))
@@ -304,14 +306,14 @@ function SCIP.find_primal_solution(
             data.lmo,
             x,
             activeSet,
-            config.warmStart,
+            config.fwWarmStart,
             ls,
             fwCallback,
             remainingTime
         )
 
         stats.fwTime += timeElapsed(fwStartTime)
-        fwIters = length(fwTraj)
+        fwIters = fwStepCount
         stats.fwIterations += fwIters
 
         # If FW gives us intermediate solutions via callback that escape the rounding target, we immediately jump to next iteration with the escaped solution
@@ -321,7 +323,7 @@ function SCIP.find_primal_solution(
             continue  # skip rest of checks and go to next FPFW iteration
         else
             xNew = fwResult.x
-            if config.warmStart && config.fwVariant !== :vanilla
+            if config.fwWarmStart && config.fwVariant !== :vanilla
                 activeSet = fwResult.active_set
             end
         end
@@ -338,17 +340,6 @@ function SCIP.find_primal_solution(
             end
         end
 
-        # if DEBUG_VERBOSE
-        #     for (t, xk, fk) in fwTraj
-        #         t > DEF_FW_MAX_ITER && DEF_FW_MAX_ITER > 0 && continue
-        #         println("--- FW Step $t ---")
-        #         println("Solution:")
-        #         for i in intIdx
-        #             @printf("  x[%d]: %.3f\n", i, xk[i])
-        #         end
-        #         @printf("Objective = %.3f\n", fk)
-        #     end
-        # end
 
         # Step 3: Check feasibility, integrality, distance moved, and objective value
         isIntegral = isSolutionIntegral(scip, xNew, intIdx)
@@ -356,7 +347,7 @@ function SCIP.find_primal_solution(
 
         obj = sum(xNew[j] * SCIP.SCIPvarGetObj(SCIP.SCIPcolGetVar(lpCols[j])) for j in 1:ncols)
         step = dist(xNew, xPrev)
-        nFrac = count(i -> SCIP.SCIPisEQ(scip, xNew[i], round(xNew[i])) == SCIP.FALSE, intIdx)
+        nFrac = countFracVars(scip, intIdx, xNew)
         iterTime = timeElapsed(iterStartTime)
 
         if DEBUG_VERBOSE
@@ -408,6 +399,11 @@ function SCIP.find_primal_solution(
     stats.heurTime = timeElapsed(heurStartTime)
     stats.primalBound = Float64(SCIP.SCIPgetPrimalbound(scip))
     stats.gap = Float64(SCIP.SCIPgetGap(scip))
+
+    if config.lmoWarmStart && data.lmo !== nothing
+        lpiRef = Ref(data.lmo.lpi)
+        SCIP.@SCIP_CALL SCIP.SCIPlpiFree(lpiRef)
+    end
 
     return (SCIP.SCIP_OKAY, result)
 end
