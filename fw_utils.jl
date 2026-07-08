@@ -38,9 +38,9 @@ function buildFWFunctions(norm::Symbol, intIdx::Vector{Int}, xRound::Vector{Floa
             # TODO: General integer case
             for i in intIdx
                 d = x[i] - xRound[i]
-                if d > 0
+                if d > DEF_INT_TOLERANCE
                     storage[i] = 1.0
-                elseif d < 0
+                elseif d < -DEF_INT_TOLERANCE
                     storage[i] = -1.0
                 else
                     storage[i] = xRound[i] < 0.5 ? 1.0 : -1.0

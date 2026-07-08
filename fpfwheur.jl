@@ -66,6 +66,7 @@ function SCIP.find_primal_solution(
     # FW setup
     activeSet = nothing
     f, grad!, dist = buildFWFunctions(config.norm, intIdx, xRound)
+    # prevGrad = fill(0.0, length(x))
     # fwCallback = (state, args...) -> begin
     #     # Skip FW bookkeeping steps where d and gamma are not meaningful
     #     if state.step_type === FrankWolfe.ST_LAST || state.step_type === FrankWolfe.ST_POSTPROCESS
@@ -299,10 +300,24 @@ function SCIP.find_primal_solution(
         fwStartTime = time()
         ls = buildLineSearch(config.lineSearch)
 
+        # prevGrad .= 0.0
+        # debugGrad! = (storage, x) -> begin
+        #     grad!(storage, x)
+        #     for i in intIdx
+        #         if prevGrad[i] != 0.0 && storage[i] != prevGrad[i]
+        #             @printf("  [grad flip] var=%d x=%.6f xRound=%.6f old=%.0f new=%.0f\n",
+        #                 i, x[i], xRound[i], prevGrad[i], storage[i])
+        #         end
+        #     end
+        #     copyto!(prevGrad, storage)
+        #     return storage
+        # end
+
         fwResult = run_fw(
             config.fwVariant,
             f,
             grad!,
+            # debugGrad!,
             data.lmo,
             x,
             activeSet,
