@@ -56,6 +56,7 @@ function printConfigs(config::FPFWConfig)
     printstyled("[FPFW configs]\n", color=:cyan)
     println("norm = $(config.norm)")
     println("fwVariant = $(config.fwVariant)")
+    println("fwMaxIterations = $(config.fwMaxIterations)")
     println("lineSearch = $(config.lineSearch)")
     println("timeLimit = $(config.timeLimit)")
     println("randomizedRounding = $(config.randRound ? "enabled" : "disabled")")
@@ -65,6 +66,8 @@ function printConfigs(config::FPFWConfig)
     println("useSubMIP = $(config.useSubMIP ? "enabled" : "disabled")")
     println("presolve = $(config.presolve ? "enabled" : "disabled")")
     println("seed = $(config.seed)")
+    println("enablePlot = $(config.enablePlot ? "enabled" : "disabled")")
+    println("verbose = $(config.verbose ? "enabled" : "disabled")")
 end
 
 function printResults(stats::FPFWStats)
@@ -214,7 +217,8 @@ function perturb(
     x::Vector{Float64},
     binIdx::Vector{Int},
     intIdx::Vector{Int},
-    avgFlips::Int
+    avgFlips::Int,
+    verbose::Bool
 )
     fracVars = [(abs(xRound[i] - x[i]), i) for i in intIdx if SCIP.SCIPisEQ(scip, xRound[i], x[i]) == SCIP.FALSE]
     sort!(fracVars, rev=true)
@@ -222,7 +226,7 @@ function perturb(
     nFlips = round(Int, avgFlips * (rand() + 0.5))
     nFracFlips = clamp(nFlips, 1, length(fracVars))
 
-    if DEBUG_VERBOSE
+    if verbose
         println("Perturbing $nFracFlips integer variables (out of $(length(fracVars)) fractional variables)")
     end
 

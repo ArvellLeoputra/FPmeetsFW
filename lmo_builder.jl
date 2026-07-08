@@ -72,7 +72,8 @@ function buildLPILMO(
     lpRows::Vector{Ptr{SCIP.SCIP_ROW}},
     colDict::Dict{Ptr{SCIP.SCIP_COL}, Int},
     ncols::Int32,
-    nrows::Int32
+    nrows::Int32,
+    verbose::Bool
 )
     lmoStart = time()
 
@@ -159,7 +160,7 @@ function buildLPILMO(
     @assert ncols_ref[] == ncols "LPI ncols $(ncols_ref[]) != ncols $ncols"
     @assert nrows_ref[] == nrows "LPI nrows $(nrows_ref[]) != nrows $nrows"
 
-    return BaseLMO(lpi, ncols, nrows)
+    return BaseLMO(lpi, ncols, nrows, verbose)
 end
 
 # Extract LP basis from SCIP's internal LP solver
@@ -209,7 +210,7 @@ function FrankWolfe.compute_extreme_point(lmo::BaseLMO, direction::AbstractVecto
     )
 
     # Check current basis statuses
-    if DEBUG_VERBOSE
+    if lmo.verbose
         nrows_ref = Ref{Cint}(0)
         SCIP.SCIPlpiGetNRows(lmo.lpi, nrows_ref)
 
@@ -217,6 +218,8 @@ function FrankWolfe.compute_extreme_point(lmo::BaseLMO, direction::AbstractVecto
         rstat = zeros(Cint, nrows_ref[])
         SCIP.SCIPlpiGetBase(lmo.lpi, cstat, rstat)
 
+        @printf("LMO direction: pos=%d neg=%d zeros=%d\n",
+            count(>(0.0), direction), count(<(0.0), direction), count(==(0.0), direction))
         @printf("LMO basis before solve: cstat L=%d B=%d U=%d | rstat L=%d B=%d U=%d\n",
             count(==(0), cstat), count(==(1), cstat), count(==(2), cstat),
             count(==(0), rstat), count(==(1), rstat), count(==(2), rstat))
@@ -225,7 +228,7 @@ function FrankWolfe.compute_extreme_point(lmo::BaseLMO, direction::AbstractVecto
     # Solve with dual simplex
     SCIP.@SCIP_CALL SCIP.SCIPlpiSolveDual(lmo.lpi)
 
-    if DEBUG_VERBOSE
+    if lmo.verbose
         simplexIter = Ref{Cint}(0)
         SCIP.@SCIP_CALL SCIP.SCIPlpiGetIterations(lmo.lpi, simplexIter)
 
@@ -253,6 +256,10 @@ function FrankWolfe.compute_extreme_point(lmo::BaseLMO, direction::AbstractVecto
             C_NULL
         )
 
+        if lmo.verbose
+            nFracAll = count(v -> v > 1e-6 && v < 1 - 1e-6, solVector)
+            @printf("LMO solution: nFrac=%d obj=%.4f\n", nFracAll, obj[])
+        end
         return solVector
     else
         error("BaseLMO: LP not primal feasible after dual simplex solve")

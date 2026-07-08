@@ -9,6 +9,7 @@ structure.md
 miplib_binary/
 miplib_full/
 slurm_script/
+plots/
 
 # Julia
 Manifest.toml

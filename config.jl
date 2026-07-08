@@ -15,7 +15,23 @@ function parseCfgFile(path::String)
 end
 
 function buildConfig(params::Dict{String, String})
-    inputs = ["norm", "fwVariant", "fwLineSearch", "timeLimit", "randomizedRounding", "randomFeasibilityCheck", "fwWarmStart", "lmoWarmStart", "useSubMIP", "presolve", "seed"]
+    inputs = [
+        "norm",
+        "fwVariant",
+        "fwMaxIterations",
+        "fwLineSearch",
+        "timeLimit",
+        "randomizedRounding",
+        "randomFeasibilityCheck",
+        "fwWarmStart",
+        "lmoWarmStart",
+        "useSubMIP",
+        "presolve",
+        "seed",
+        "enablePlot",
+        "verbose"
+    ]
+    
     for input in inputs
         if !haskey(params, input)
             error("Missing key '$input' in fpfw.cfg or CLI args")
@@ -24,6 +40,7 @@ function buildConfig(params::Dict{String, String})
 
     norm = Symbol(params["norm"])
     fwVariant = Symbol(params["fwVariant"])
+    fwMaxIterations = parse(Int, params["fwMaxIterations"])
     fwLineSearch = Symbol(params["fwLineSearch"])
     timeLimit = parse(Float64, params["timeLimit"])
     randRound = parse(Bool, params["randomizedRounding"])
@@ -33,6 +50,8 @@ function buildConfig(params::Dict{String, String})
     useSubMIP = parse(Bool, params["useSubMIP"])
     presolve = parse(Bool, params["presolve"])
     seed = parse(Int, params["seed"])
+    enablePlot = parse(Bool, params["enablePlot"])
+    verbose = parse(Bool, params["verbose"])
 
     if norm ∉ VALID_NORMS
         error("Invalid norm: $norm. Must be one of: $VALID_NORMS")
@@ -50,7 +69,11 @@ function buildConfig(params::Dict{String, String})
         error("manhattan norm requires a smooth objective — use agnostic or unitary instead")
     end
 
-    return FPFWConfig(norm, fwVariant, fwLineSearch, timeLimit, randRound, randFeasCheck, fwWarmStart, lmoWarmStart, useSubMIP, presolve, seed)
+    if fwMaxIterations < 0
+        error("Invalid fwMaxIterations: $fwMaxIterations. Must be a positive integer")
+    end
+
+    return FPFWConfig(norm, fwVariant, fwMaxIterations, fwLineSearch, timeLimit, randRound, randFeasCheck, fwWarmStart, lmoWarmStart, useSubMIP, presolve, seed, enablePlot, verbose)
 end
 
 function loadConfig(args::Vector{String})

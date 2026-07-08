@@ -11,6 +11,7 @@ const MOI = MathOptInterface
 struct FPFWConfig
     norm::Symbol
     fwVariant::Symbol
+    fwMaxIterations::Int
     lineSearch::Symbol
     timeLimit::Float64
     randRound::Bool
@@ -20,6 +21,8 @@ struct FPFWConfig
     useSubMIP::Bool
     presolve::Bool
     seed::Int
+    enablePlot::Bool
+    verbose::Bool
 end
 
 mutable struct FPFWStats
@@ -46,6 +49,7 @@ struct BaseLMO <: FrankWolfe.LinearMinimizationOracle
     lpi::Ptr{SCIP.SCIP_LPI}
     ncols::Int32
     nrows::Int32
+    verbose::Bool
 end
 
 mutable struct FPFWRunData
@@ -76,8 +80,6 @@ const DEF_INT_TOLERANCE = 1e-6
 const DEF_FW_TOLERANCE = 1e-7
 
 # Iteration parameters
-const DEF_FW_MAX_ITER = 1
-
 # FW escape check: check if FW escapes its rounding point
 const DEF_FW_ESCAPE = false
 
@@ -89,9 +91,6 @@ const DEF_BIGBIGM = 1e15                    # Bigbig M constant for perturbation
 
 # Randomized rounding feasibility check parameters
 const DEF_RAND_FEAS_ITER_LIMIT = 100
-
-# Debug mode: set to true to print detailed step-by-step output
-const DEBUG_VERBOSE = false
 
 # Valid options for FPFWConfig fields
 const VALID_NORMS = (:euclidean, :manhattan, :smoothManhattan)

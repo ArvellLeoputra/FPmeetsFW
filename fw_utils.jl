@@ -102,24 +102,28 @@ function buildLineSearch(lineSearch::Symbol)
     end
 end
 
-function run_fw(variant, f, grad!, lmo, x0, activeSet, warmStart, ls, callback, remainingTime)
+function run_fw(variant, f, grad!, lmo, x0, activeSet, warmStart, ls, callback, remainingTime, fwMaxIterations, verbose)
     if warmStart && activeSet !== nothing && variant !== :vanilla
         callFWVariant(variant, f, grad!, lmo, activeSet,
-            max_iteration = DEF_FW_MAX_ITER - 1,
-            verbose = false,
+            max_iteration = fwMaxIterations - 1,
+            verbose = verbose,
             line_search = ls,
             epsilon = DEF_FW_TOLERANCE,
             callback = callback,
-            timeout = remainingTime
+            timeout = remainingTime,
+            dual_gap_compute_frequency = 1,
+            trajectory = true
         )
     else
         callFWVariant(variant, f, grad!, lmo, x0,
-            max_iteration = DEF_FW_MAX_ITER - 1,
-            verbose = false,
+            max_iteration = fwMaxIterations - 1,
+            verbose = verbose,
             line_search = ls,
             epsilon = DEF_FW_TOLERANCE,
             callback = callback,
-            timeout = remainingTime
+            timeout = remainingTime,
+            dual_gap_compute_frequency = 1,
+            trajectory = true
         )
     end
 end
