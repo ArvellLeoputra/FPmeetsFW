@@ -79,10 +79,6 @@ end
 const DEF_INT_TOLERANCE = 1e-6
 const DEF_FW_TOLERANCE = 1e-7
 
-# Iteration parameters
-# FW escape check: check if FW escapes its rounding point
-const DEF_FW_ESCAPE = false
-
 # Perturbation and restart parameters
 const DEF_MAX_STAGNATION = 3                # Maximum number of iterations without improvement before perturbing
 const DEF_STAGNATION_RESTART_THRESHOLD = 3  # Maximum number of stagnations before restarting
