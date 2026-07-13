@@ -46,9 +46,11 @@ mutable struct FPFWStats
 end
 
 struct BaseLMO <: FrankWolfe.LinearMinimizationOracle
+    scip::Ptr{SCIP.SCIP_}
     lpi::Ptr{SCIP.SCIP_LPI}
     ncols::Int32
     nrows::Int32
+    intIdx::Vector{Int}
     verbose::Bool
 end
 
@@ -87,6 +89,9 @@ const DEF_BIGBIGM = 1e15                    # Bigbig M constant for perturbation
 
 # Randomized rounding feasibility check parameters
 const DEF_RAND_FEAS_ITER_LIMIT = 100
+
+# Pump display formatting parameters
+const DEF_MAX_INT_DIGITS = 7  # switch a float column to scientific notation beyond this many integer digits
 
 # Valid options for FPFWConfig fields
 const VALID_NORMS = (:euclidean, :manhattan, :smoothManhattan)

@@ -86,7 +86,7 @@ function loadConfig(args::Vector{String})
     end
     fileName = args[1]
 
-    cfgPath = joinpath(@__DIR__, "fpfw.cfg")
+    cfgPath = joinpath(@__DIR__, "..", "..", "settings", "fpfw.cfg")
     params = parseCfgFile(cfgPath)
 
     for arg in args[2:end]

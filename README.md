@@ -44,7 +44,7 @@ until x is integral or time limit / max iterations
 julia --project main.jl <fileName.mps> [key=value ...]
 ```
 
-All arguments are optional and fall back to `fpfw.cfg`. The cfg file is required.
+All arguments are optional and fall back to `settings/fpfw.cfg`. The cfg file is required.
 
 Examples:
 ```bash
@@ -54,33 +54,38 @@ julia --project main.jl ./testcase/test1.mps norm=euclidean seed=123
 
 ## Configuration
 
-Settings are loaded in priority order: **command-line args > `fpfw.cfg`**
+Settings are loaded in priority order: **command-line args > `settings/fpfw.cfg`**
 
-`fpfw.cfg` (run configuration):
+`settings/fpfw.cfg` (run configuration):
 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `norm` | `manhattan` | Projection norm (`euclidean`, `manhattan`, `smoothManhattan`) |
 | `fwVariant` | `vanilla` | FW variant (`vanilla`, `away`, `blended_pairwise`, `blended`) |
+| `fwMaxIterations` | `1` | Max Frank-Wolfe iterations per FP projection step |
 | `fwLineSearch` | `unitary` | Line search (`unitary`, `agnostic`, `backtracking`, `secant`, `adaptive`) |
+| `timeLimit` | `300.0` | Total heuristic time limit (seconds) |
 | `randomizedRounding` | `false` | Randomized rounding threshold |
 | `randomFeasibilityCheck` | `false` | Randomized feasibility check |
-| `warmStart` | `true` | Warm-start FW active set across FP iterations |
+| `fwWarmStart` | `true` | Warm-start FW active set across FP iterations |
+| `lmoWarmStart` | `true` | Warm-start the LMO's LP basis across FP iterations |
+| `useSubMIP` | `false` | Fall back to fixing integer vars and resolving the LP when rounding fails |
 | `presolve` | `true` | Enable SCIP presolving |
 | `seed` | `42` | Random seed for reproducibility |
+| `enablePlot` | `false` | Plot FW iterates (2D instances only) |
+| `verbose` | `false` | Print detailed per-iteration output |
 
-`dependencies.jl` (algorithm constants):
+`src/dependencies.jl` (algorithm constants):
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `DEF_FW_MAX_ITER` | `1` | Max Frank-Wolfe iterations per FP projection step |
-| `DEF_PUMP_TIME_LIMIT` | `300s` | Total pump time limit |
-| `DEF_SCIP_TIME_LIMIT` | `300s` | SCIP solver time limit (for root LP solve) |
 | `DEF_INT_TOLERANCE` | `1e-6` | Tolerance for feasibility/integrality checks |
 | `DEF_FW_TOLERANCE` | `1e-7` | FW convergence tolerance (duality gap) |
-| `DEF_PERTURB_FRACTION` | `0.2` | Fraction of binary vars to flip on cycle restart |
-| `DEF_MAX_RESTARTS` | `1000` | Max restarts after cycle detection |
-| `DEBUG_VERBOSE` | `false` | Print detailed per-iteration output |
+| `DEF_MAX_STAGNATION` | `3` | Max iterations without improvement before perturbing |
+| `DEF_STAGNATION_RESTART_THRESHOLD` | `3` | Max stagnation-triggered perturbs before restarting |
+| `DEF_BIGM` / `DEF_BIGBIGM` | `1e9` / `1e15` | Big-M constants used when perturbing general integer variables |
+| `DEF_RAND_FEAS_ITER_LIMIT` | `100` | Max attempts for randomized feasibility rounding |
+| `DEF_MAX_INT_DIGITS` | `7` | Switch a pump-table float column to scientific notation beyond this many integer digits |
 
 ## Dependencies
 
@@ -91,14 +96,27 @@ Settings are loaded in priority order: **command-line args > `fpfw.cfg`**
 ## File Structure
 
 ```
-├── main.jl              # Entry point — parses args and calls runInstance
-├── fpfw.cfg             # Run configuration
-├── config.jl            # Configuration loading and validation
-├── runner.jl            # runInstance — sets up and runs the solver
-├── dependencies.jl      # Structs, constants, and valid option sets
-├── fpfwheur.jl          # Main FPFW heuristic implementation
-├── lmo_builder.jl       # Builds Linear Minimization Oracle from SCIP LP
-├── fw_utils.jl          # Frank-Wolfe utility functions
-├── helper.jl            # Print functions and solution utilities
-└── scip_setup.jl        # SCIP model setup and configuration
+├── main.jl                  # Entry point — parses args and calls runInstance
+├── settings/
+│   └── fpfw.cfg             # Run configuration
+├── src/
+│   ├── dependencies.jl      # Structs, constants, and valid option sets
+│   ├── fw/
+│   │   ├── driver.jl        # Builds FW objective/gradient/line-search, dispatches to FrankWolfe.jl variants
+│   │   ├── lmoLPI.jl        # LMO backed by SCIP's raw LPI (default, warm-startable)
+│   │   └── lmoMOI.jl        # LMO backed by MathOptInterface (cold-start fallback)
+│   ├── heur/
+│   │   ├── fpfwheur.jl      # Main FPFW heuristic implementation (SCIP.find_primal_solution)
+│   │   ├── pump.jl          # Rounding, cycle-detection hashing, perturb/restart mechanics
+│   │   └── runner.jl        # runInstance — sets up and runs the solver
+│   ├── scip/
+│   │   ├── setup.jl         # JuMP-level SCIP solver configuration
+│   │   ├── queries.jl       # Read-only SCIP/LP state queries
+│   │   └── submit.jl        # Solution submission and sub-MIP solving (mutates SCIP state)
+│   └── utils/
+│       ├── config.jl        # Configuration loading and validation
+│       ├── stats.jl         # Stats aggregation and console reporting
+│       ├── display.jl       # Pump-table formatting
+│       └── plot.jl          # 2D iterate plotting (optional)
+└── testcase/                # Sample .mps instances
 ```
