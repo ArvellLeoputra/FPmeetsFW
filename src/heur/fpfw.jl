@@ -45,10 +45,10 @@ function SCIP.find_primal_solution(
     # Build LMO from current LP
     if data.lmo === nothing
         if config.lmoWarmStart
-            data.lmo = buildLPILMO(scip, lpCols, lpRows, colDict, ncols, nrows, intIdx, config.verbose)
-            LPIinitBase(scip, data.lmo)
+            data.lmo = buildLPILMO(scip, lpCols, lpRows, colDict, intIdx, gIntIdx, config.norm, ncols, nrows, config.verbose)
+            LPIinitBase(scip, data.lmo, ncols, nrows)
         else
-            data.lmo = SCIPbuildLMO(scip, lpCols, lpRows, colDict, ncols, nrows)
+            data.lmo, data.dConstraintRefs = SCIPbuildLMO(scip, lpCols, lpRows, colDict, gIntIdx, config.norm, ncols, nrows)
         end
     end
 
@@ -66,7 +66,7 @@ function SCIP.find_primal_solution(
     # FW setup
     activeSet = nothing
     prevGrad = zeros(Float64, ncols)
-    f, grad!, dist = buildFWFunctions(config.norm, intIdx, xRound)
+    f, grad!, dist = buildFWFunctions(config.norm, binIdx, gIntIdx, xRound)
     
     # Iterate collection for 2D plotting
     xIterates = Vector{Vector{Float64}}()
@@ -164,7 +164,15 @@ function SCIP.find_primal_solution(
         # Step 1: Round LP feasible solution
         xRound .= x  # initialize xRound from LP solution so continuous variables are not left at zero
         roundSolution!(xRound, x, intIdx, config.randRound)
-        
+
+        if config.norm == :manhattan
+            if config.lmoWarmStart
+                LPIupdateRounding!(data.lmo, gIntIdx, xRound)
+            else
+                MOIupdateRounding!(data.lmo, data.dConstraintRefs, gIntIdx, xRound)
+            end
+        end
+
         if config.enablePlot
             push!(xIterates, copy(x))
             push!(xRoundIterates, copy(xRound))
@@ -256,48 +264,78 @@ function SCIP.find_primal_solution(
             end
         end
 
-        prevGrad .= 0.0
-        # Gradient check function to detect flips in the gradient
-        gradCheck! = (storage, x) -> begin
-            grad!(storage, x)
-            if config.verbose
-                for i in intIdx
-                    if prevGrad[i] != 0.0 && storage[i] != prevGrad[i]
-                        @printf("  [grad flip] var=%d x=%.6f xRound=%.6f old=%.0f new=%.0f\n",
-                            i, x[i], xRound[i], prevGrad[i], storage[i])
-                    end
-                end
-            end
-            copyto!(prevGrad, storage)
-            return storage
-        end
-
         # Step 2: "Projection" using Frank-Wolfe
         remainingTime = heurTimeLimit - (timeElapsed(heurStartTime))
         fwStartTime = time()
         ls = buildLineSearch(config.lineSearch)
-        fwResult = runFW(
-            config.fwVariant,
-            f,
-            gradCheck!,
-            data.lmo;
-            x0=x,
-            activeSet=activeSet,
-            warmStart=config.fwWarmStart,
-            ls=ls,
-            remainingTime=remainingTime,
-            fwMaxIterations=config.fwMaxIterations,
-            callback=nothing,
-            # Always false: FrankWolfe.jl's own per-iteration verbose output would be very
-            # noisy nested inside the outer pump loop. gradCheck! above already provides
-            # our own targeted diagnostic (gradient flips) when config.verbose is set.
-            verbose=false
-        )
 
-        # Extract FW result
-        xProj = fwResult.x
-        if config.fwWarmStart && config.fwVariant !== :vanilla
-            activeSet = fwResult.active_set
+        if config.norm == :manhattan
+            # Pad x with d, seeded at the true distance, for a feasible start
+            nInt = length(gIntIdx)
+            xExt0 = zeros(Float64, ncols + nInt)
+            xExt0[1:ncols] .= x
+
+            for (k, i) in enumerate(gIntIdx)
+                xExt0[ncols + k] = abs(x[i] - xRound[i])
+            end
+
+            fwResult = runFW(
+                config.fwVariant,
+                f,
+                grad!,
+                data.lmo;
+                x0=xExt0,
+                activeSet=nothing,
+                warmStart=false,
+                ls=ls,
+                remainingTime=remainingTime,
+                fwMaxIterations=config.fwMaxIterations,
+                callback=nothing,
+                verbose=false
+            )
+
+            intGap = f(fwResult.x)  # sum(d) on the full [x; d] result
+            xProj = fwResult.x[1:ncols]
+        else
+            prevGrad .= 0.0
+            # Gradient check function to detect flips in the gradient
+            gradCheck! = (storage, x) -> begin
+                grad!(storage, x)
+                if config.verbose
+                    for i in intIdx
+                        if prevGrad[i] != 0.0 && storage[i] != prevGrad[i]
+                            @printf("  [grad flip] var=%d x=%.6f xRound=%.6f old=%.0f new=%.0f\n",
+                                i, x[i], xRound[i], prevGrad[i], storage[i])
+                        end
+                    end
+                end
+                copyto!(prevGrad, storage)
+                return storage
+            end
+
+            fwResult = runFW(
+                config.fwVariant,
+                f,
+                gradCheck!,
+                data.lmo;
+                x0=x,
+                activeSet=activeSet,
+                warmStart=config.fwWarmStart,
+                ls=ls,
+                remainingTime=remainingTime,
+                fwMaxIterations=config.fwMaxIterations,
+                callback=nothing,
+                # Always false: FrankWolfe.jl's own per-iteration verbose output would be very
+                # noisy nested inside the outer pump loop. gradCheck! above already provides
+                # our own targeted diagnostic (gradient flips) when config.verbose is set.
+                verbose=false
+            )
+
+            xProj = fwResult.x
+            intGap = f(xProj)  # distance to target rounded point (= projObj)
+            if config.fwWarmStart && config.fwVariant !== :vanilla
+                activeSet = fwResult.active_set
+            end
         end
 
         # Update FW stats
@@ -307,7 +345,6 @@ function SCIP.find_primal_solution(
 
         # Compute metrics for logging
         origObj = origObjective(scip, lpCols, xProj, ncols)
-        intGap = f(xProj)  # distance to target rounded point (= projObj)
         nFrac = countFracVars(scip, intIdx, xProj)
         step = dist(xProj, xPrev)
         iterTime = timeElapsed(iterStartTime)

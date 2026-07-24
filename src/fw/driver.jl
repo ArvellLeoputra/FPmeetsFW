@@ -8,22 +8,43 @@ function buildGradFunction(intIdx::Vector{Int}, gradFormula)
     end
 end
 
-function buildFWFunctions(norm::Symbol, intIdx::Vector{Int}, xRound::Vector{Float64})
-    if norm == :manhattan
-        f = x -> sum(abs(x[i] - xRound[i]) for i in intIdx)
+function buildFWFunctions(
+    norm::Symbol,
+    binIdx::Vector{Int},
+    gIntIdx::Vector{Int},
+    xRound::Vector{Float64}
+)
+    intIdx = [binIdx; gIntIdx]
 
-        # Currently, only works for binary
-        # TODO: General integer case
-        grad! = buildGradFunction(intIdx, (i, x) -> begin
-            d = x[i] - xRound[i]
-            if d > DEF_INT_TOLERANCE
-                1.0
-            elseif d < -DEF_INT_TOLERANCE
-                -1.0
+    if norm == :manhattan
+        ncols = length(xRound)
+        nGInt = length(gIntIdx)
+
+        function binTerm(i, x)
+            if xRound[i] < 0.5
+                return x[i]
             else
-                xRound[i] < 0.5 ? 1.0 : -1.0
+                return 1.0 - x[i]
             end
-        end)
+        end
+
+        f = xExt -> begin
+            binaryDistance = sum(binTerm(i, xExt) for i in binIdx; init=0.0)
+            generalIntDistance = sum(xExt[ncols + k] for k in 1:nGInt; init=0.0)
+            binaryDistance + generalIntDistance
+        end
+
+        grad! = (storage, xExt) -> begin
+            storage .= 0.0
+            for i in binIdx
+                storage[i] = xRound[i] < 0.5 ? 1.0 : -1.0
+            end
+
+            for k in 1:nGInt
+                storage[ncols + k] = 1.0
+            end
+            return storage
+        end
 
         dist = (x, y) -> sum(abs(x[i] - y[i]) for i in intIdx)
     elseif norm == :smoothManhattan
@@ -78,19 +99,16 @@ function runFW(variant, f, grad!, lmo; x0, activeSet, warmStart, ls, remainingTi
         epsilon = DEF_FW_TOLERANCE,
         callback = callback,
         timeout = remainingTime,
-        dual_gap_compute_frequency = 1,
         trajectory = true
     )
 end
 
-# Dispatch to the right FrankWolfe.jl algorithm. startPoint is either a plain
-# vector (cold-starting) or a FrankWolfe.ActiveSet (warm-starting).
 function callFWVariant(variant::Symbol, f, grad!, lmo, startPoint; kwargs...)
     if variant == :vanilla
         if startPoint isa FrankWolfe.ActiveSet
             error("Vanilla FW variant does not have an active set.")
         end
-        FrankWolfe.frank_wolfe(f, grad!, lmo, startPoint; kwargs...)
+        FrankWolfe.frank_wolfe(f, grad!, lmo, startPoint; dual_gap_compute_frequency=1, kwargs...)
     elseif variant == :away
         FrankWolfe.away_frank_wolfe(f, grad!, lmo, startPoint; kwargs...)
     elseif variant == :blended_pairwise

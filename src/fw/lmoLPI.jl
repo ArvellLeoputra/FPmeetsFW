@@ -3,13 +3,13 @@ function buildLPILMO(
     lpCols::Vector{Ptr{SCIP.SCIP_COL}},
     lpRows::Vector{Ptr{SCIP.SCIP_ROW}},
     colDict::Dict{Ptr{SCIP.SCIP_COL}, Int},
+    intIdx::Vector{Int},
+    gIntIdx::Vector{Int},
+    norm::Symbol,  # only :manhattan gets the auxiliary d-block
     ncols::Int32,
     nrows::Int32,
-    intIdx::Vector{Int},
     verbose::Bool
 )
-    lmoStart = time()
-
     # Create SCIPlpi instance
     lpiPtr = Ref{Ptr{SCIP.SCIP_LPI}}(C_NULL)
     msghdlr = SCIP.SCIPgetMessagehdlr(scip)
@@ -83,19 +83,106 @@ function buildLPILMO(
         nonzVals
     )
 
-    if verbose
-        lmoTime = timeElapsed(lmoStart)
-        println("LMO build time : $lmoTime")
+    if norm == :manhattan
+        nGInt = length(gIntIdx)
+
+        dObj = ones(Cdouble, nGInt)
+        dLb = zeros(Cdouble, nGInt)
+        dUb = fill(SCIP.SCIPlpiInfinity(lpi), nGInt)
+
+        # Add auxiliary d-block columns for Manhattan norm
+        SCIP.@SCIP_CALL SCIP.SCIPlpiAddCols(
+            lpi,
+            Cint(nGInt),
+            dObj,
+            dLb,
+            dUb,
+            C_NULL,
+            Cint(0),
+            C_NULL,
+            C_NULL,
+            C_NULL
+        )
+
+        dLhs = Float64[]
+        dRhs = Float64[]
+        dBeg = Cint[]
+        dNonzIdx = Cint[]
+        dNonzVals = Float64[]
+        dOffset = Cint(0)
+
+        for (k, i) in enumerate(gIntIdx)
+            dCol = Cint(ncols + k - 1)  # 0-based: d columns follow the original ncols
+            xCol = Cint(i - 1)
+
+            # Add the first row for the absolute value constraint: d_k - x_i >= 0
+            push!(dLhs, 0.0)
+            push!(dRhs, inf)
+            push!(dBeg, dOffset)
+            push!(dNonzIdx, dCol)
+            push!(dNonzVals, 1.0)
+            push!(dNonzIdx, xCol)
+            push!(dNonzVals, -1.0)
+            dOffset += 2
+
+            # Add the second row for the absolute value constraint: d_k + x_i >= 0
+            push!(dLhs, 0.0)
+            push!(dRhs, inf)
+            push!(dBeg, dOffset)
+            push!(dNonzIdx, dCol)
+            push!(dNonzVals, 1.0)
+            push!(dNonzIdx, xCol)
+            push!(dNonzVals, 1.0)
+            dOffset += 2
+        end
+
+        SCIP.@SCIP_CALL SCIP.SCIPlpiAddRows(
+            lpi,
+            Cint(2 * nGInt),
+            dLhs,
+            dRhs,
+            C_NULL,
+            dOffset,
+            dBeg,
+            dNonzIdx,
+            dNonzVals
+        )
+    else
+        nGInt = 0
     end
+
+    totalCols = ncols + nGInt
+    totalRows = nrows + 2 * nGInt
 
     ncolsRef = Ref{Cint}(0)
     nrowsRef = Ref{Cint}(0)
     SCIP.SCIPlpiGetNCols(lpi, ncolsRef)
     SCIP.SCIPlpiGetNRows(lpi, nrowsRef)
-    @assert ncolsRef[] == ncols "LPI ncols $(ncolsRef[]) != ncols $ncols"
-    @assert nrowsRef[] == nrows "LPI nrows $(nrowsRef[]) != nrows $nrows"
+    @assert ncolsRef[] == totalCols "LPI ncols $(ncolsRef[]) != ncols $totalCols"
+    @assert nrowsRef[] == totalRows "LPI nrows $(nrowsRef[]) != nrows $totalRows"
 
-    return BaseLMO(scip, lpi, ncols, nrows, intIdx, verbose)
+    return BaseLMO(scip, lpi, Int32(totalCols), Int32(totalRows), intIdx, verbose)
+end
+
+# Update the rounding values in the LMO's LPI
+function LPIupdateRounding!(lmo::BaseLMO, gIntIdx::Vector{Int}, xRound::Vector{Float64})
+    nGInt = length(gIntIdx)
+
+    nDRows = 2 * nGInt
+    origNrows = lmo.nrows - nDRows  # d-rows were appended after the original nrows rows
+    ind = Cint.(origNrows:(origNrows + nDRows - 1))
+    lhs = Float64[]
+    rhs = Float64[]
+    inf = SCIP.SCIPlpiInfinity(lmo.lpi)
+
+    for i in gIntIdx
+        push!(lhs, -xRound[i])
+        push!(rhs, inf)
+        push!(lhs, xRound[i])
+        push!(rhs, inf)
+    end
+
+    SCIP.@SCIP_CALL SCIP.SCIPlpiChgSides(lmo.lpi, Cint(nDRows), ind, lhs, rhs)
 end
 
 # Extract LP basis from SCIP's internal LP solver
@@ -122,9 +209,17 @@ function LPIsetBase(lmo::BaseLMO, cstat::Vector{Cint}, rstat::Vector{Cint})
 end
 
 # Initialize LMO basis from SCIP's internal LP basis
-function LPIinitBase(scip::Ptr{SCIP.SCIP_}, lmo::BaseLMO)
-    cstat, rstat = LPIgetBase(scip, lmo.ncols, lmo.nrows)
-    LPIsetBase(lmo, cstat, rstat)
+function LPIinitBase(scip::Ptr{SCIP.SCIP_}, lmo::BaseLMO, ncols::Int32, nrows::Int32)
+    cstatOrig, rstatOrig = LPIgetBase(scip, ncols, nrows)
+    if lmo.ncols == ncols && lmo.nrows == nrows
+        LPIsetBase(lmo, cstatOrig, rstatOrig)
+    else
+        cstat = zeros(Cint, lmo.ncols)
+        cstat[1:ncols] .= cstatOrig
+        rstat = ones(Cint, lmo.nrows)
+        rstat[1:nrows] .= rstatOrig
+        LPIsetBase(lmo, cstat, rstat)
+    end
 end
 
 function FrankWolfe.compute_extreme_point(lmo::BaseLMO, direction::AbstractVector; kwargs...)

@@ -10,6 +10,7 @@ miplib_binary/
 miplib_full/
 slurm_script/
 plots/
+testcase/zigzag_euclidean.mps
 
 # Julia
 Manifest.toml

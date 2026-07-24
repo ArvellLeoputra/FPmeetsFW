@@ -58,8 +58,9 @@ mutable struct FPFWRunData
     called::Int64
     lmo::Union{Nothing, FrankWolfe.MathOptLMO, BaseLMO}
     stats::FPFWStats
+    dConstraintRefs::Vector{Tuple{MOI.ConstraintIndex, MOI.ConstraintIndex}}
 
-    FPFWRunData() = new(0, nothing, FPFWStats())
+    FPFWRunData() = new(0, nothing, FPFWStats(), Tuple{MOI.ConstraintIndex, MOI.ConstraintIndex}[])
 end
 
 mutable struct FPFWHeuristic <: SCIP.Heuristic
