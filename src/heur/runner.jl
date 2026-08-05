@@ -4,7 +4,7 @@ function runInstance(fileName::String, config::FPFWConfig)
     globalStartTime = time()
     Random.seed!(config.seed)
 
-    model = minimal_setup(time_limit=config.timeLimit, presolve=config.presolve)
+    model = minimal_setup(time_limit=config.timeLimit, presolve=config.presolve, verbosity=config.verbose)
     backend = JuMP.unsafe_backend(model)
     scip = backend.inner
 

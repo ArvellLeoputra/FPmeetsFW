@@ -361,11 +361,11 @@ function SCIP.find_primal_solution(
             end
         end
 
-        if perturbed && config.verbose >= 3
+        if perturbed && config.verbose >= 4
             println("  xRound = $(xRound[activeIntIdx])  (after perturb)")
         end
 
-        if restarted && config.verbose >= 3
+        if restarted && config.verbose >= 4
             println("  xRound = $(xRound[activeIntIdx])  (after restart)")
         end
 
@@ -409,7 +409,7 @@ function SCIP.find_primal_solution(
         stats.fwTime += timeElapsed(fwStartTime)
         stats.fwIterations += fwIters
 
-        if config.verbose >= 3
+        if config.verbose >= 4
             println("   xProj = $(xProj[activeIntIdx])")
         end
 

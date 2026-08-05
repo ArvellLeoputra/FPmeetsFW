@@ -61,6 +61,7 @@ end
 
 function printRunInfo(scip::SCIP.SCIPData, config::FPFWConfig)
     name = unsafe_string(SCIP.SCIPgetProbName(scip))
+    scipVersion = "$(SCIP.SCIPmajorVersion()).$(SCIP.SCIPminorVersion()).$(SCIP.SCIPtechVersion())"
     varCount = SCIP.SCIPgetNOrigVars(scip)
     binCount = SCIP.SCIPgetNBinVars(scip)
     intCount = SCIP.SCIPgetNIntVars(scip)
@@ -68,6 +69,7 @@ function printRunInfo(scip::SCIP.SCIPData, config::FPFWConfig)
 
     printstyled("[run info]\n", color=:cyan)
     println("runName = $(config.runName)")
+    println("scipVersion = $scipVersion")
     println("instance = $name")
     println("totalVars = $varCount")
     println("binaryVars = $binCount")
