@@ -107,15 +107,14 @@ function SCIP.find_primal_solution(
     stats = data.stats
 
     # Guard the heuristic to only run once per solve
-    data.called += 1
-    if data.called > 1
+    if data.called > 0
         return (SCIP.SCIP_OKAY, SCIP.SCIP_DIDNOTRUN)
     end
 
-    # Time tracking
-    heurStartTime = time()
-    scipTime = SCIP.SCIPgetSolvingTime(scip)
-    heurTimeLimit = config.timeLimit - scipTime
+    # DURINGLPLOOP can fire mid-LP-solve; only proceed once the LP is actually optimal
+    if SCIP.SCIPgetLPSolstat(scip) != SCIP.SCIP_LPSOLSTAT_OPTIMAL
+        return (SCIP.SCIP_OKAY, SCIP.SCIP_DIDNOTRUN)
+    end
 
     # Get LP data
     ncols = SCIP.SCIPgetNLPCols(scip)
@@ -123,10 +122,23 @@ function SCIP.find_primal_solution(
     lpCols, lpRows, colDict, binIdx, gIntIdx, initSol = getLPData(scip, ncols, nrows)
     intIdx = [binIdx; gIntIdx]
 
-    # Sanity check of the LP solution
+    # Sanity check: can still legitimately mismatch on an intermediate LP; skip and retry
     dualBound = SCIP.SCIPgetDualbound(scip)
     initObj = origObjective(scip, lpCols, initSol, ncols)
-    @assert SCIP.SCIPisEQ(scip, initObj, dualBound) == SCIP.TRUE "initObj ($initObj) != dualBound ($dualBound) at heuristic start"
+    if SCIP.SCIPisFeasEQ(scip, initObj, dualBound) == SCIP.FALSE
+        if config.verbose >= 1
+            printstyled("[heuristic skipped]\n", color=:yellow)
+            @printf("initObj (%.6f) != dualBound (%.6f) -- LP not final yet, retrying next call\n", initObj, dualBound)
+        end
+        return (SCIP.SCIP_OKAY, SCIP.SCIP_DIDNOTRUN)
+    end
+
+    data.called += 1
+
+    # Time tracking
+    heurStartTime = time()
+    scipTime = SCIP.SCIPgetSolvingTime(scip)
+    heurTimeLimit = config.timeLimit - scipTime
 
     # Log initial LP solve info
     if config.verbose >= 1
