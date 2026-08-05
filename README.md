@@ -82,7 +82,7 @@ Settings are loaded in priority order: **command-line args > `settings/fpfw.cfg`
 | `DEF_INT_TOLERANCE` | `1e-6` | Tolerance for feasibility/integrality checks |
 | `DEF_FW_TOLERANCE` | `1e-7` | FW convergence tolerance (duality gap) |
 | `DEF_MAX_STAGNATION` | `3` | Max iterations without improvement before perturbing |
-| `DEF_STAGNATION_RESTART_THRESHOLD` | `3` | Max stagnation-triggered perturbs before restarting |
+| `DEF_MAX_PERTURBS` | `3` | Max stagnation-triggered perturbs before restarting |
 | `DEF_BIGM` / `DEF_BIGBIGM` | `1e9` / `1e15` | Big-M constants used when perturbing general integer variables |
 | `DEF_RAND_FEAS_ITER_LIMIT` | `100` | Max attempts for randomized feasibility rounding |
 | `DEF_MAX_INT_DIGITS` | `7` | Switch a pump-table float column to scientific notation beyond this many integer digits |

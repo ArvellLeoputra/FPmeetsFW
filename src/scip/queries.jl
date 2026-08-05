@@ -7,20 +7,24 @@ function getLPData(scip::Ptr{SCIP.SCIP_}, ncols::Int32, nrows::Int32)
     colDict = Dict(lpCols[k] => k for k in 1:ncols)
 
     binIdx = Int[]
-    intIdx = Int[]
+    gIntIdx = Int[]
     initSol = zeros(SCIP.SCIP_Real, ncols)
 
     for j in 1:ncols
         var = SCIP.SCIPcolGetVar(lpCols[j])
-        if SCIP.SCIPvarGetType(var) == SCIP.SCIP_VARTYPE_BINARY
+
+        # Remove fixed variables from the index lists
+        isFixed = SCIP.SCIPvarGetLbLocal(var) == SCIP.SCIPvarGetUbLocal(var)
+        if !isFixed && SCIP.SCIPvarGetType(var) == SCIP.SCIP_VARTYPE_BINARY
             push!(binIdx, j)
-        elseif SCIP.SCIPvarGetType(var) == SCIP.SCIP_VARTYPE_INTEGER
-            push!(intIdx, j)
+        elseif !isFixed && SCIP.SCIPvarGetType(var) == SCIP.SCIP_VARTYPE_INTEGER
+            push!(gIntIdx, j)
         end
+        
         initSol[j] = SCIP.SCIPcolGetPrimsol(lpCols[j])
     end
 
-    return lpCols, lpRows, colDict, binIdx, intIdx, initSol
+    return lpCols, lpRows, colDict, binIdx, gIntIdx, initSol
 end
 
 function origObjective(scip::Ptr{SCIP.SCIP_}, lpCols::Vector{Ptr{SCIP.SCIP_COL}}, sol::Vector{Float64}, ncols::Int32)

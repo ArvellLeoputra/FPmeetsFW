@@ -7,7 +7,7 @@ function SCIPbuildLMO(
     lpRows::Vector{Ptr{SCIP.SCIP_ROW}},
     colDict::Dict{Ptr{SCIP.SCIP_COL}, Int},
     gIntIdx::Vector{Int},
-    norm::Symbol,  # only :manhattan gets the auxiliary d-block
+    norm::Symbol,  # only :manhattan gets the auxiliary block
     ncols::Int32,
     nrows::Int32
 )
@@ -56,45 +56,45 @@ function SCIPbuildLMO(
         end
     end
 
-    dConstraints = Tuple{MOI.ConstraintIndex, MOI.ConstraintIndex}[]
+    auxConstraints = Tuple{MOI.ConstraintIndex, MOI.ConstraintIndex}[]
     if norm == :manhattan
         nGInt = length(gIntIdx)
-        d = MOI.add_variables(optModel, nGInt)
+        aux = MOI.add_variables(optModel, nGInt)
 
         for (k, i) in enumerate(gIntIdx)
-            MOI.add_constraint(optModel, d[k], MOI.GreaterThan(0.0))
+            MOI.add_constraint(optModel, aux[k], MOI.GreaterThan(0.0))
 
-            # Add the first row for the absolute value constraint: d_k - x_i >= 0
+            # Add the first row for the absolute value constraint: aux_k - x_i >= 0
             c1 = MOI.add_constraint(
                 optModel,
-                MOI.ScalarAffineFunction([MOI.ScalarAffineTerm(1.0, d[k]), MOI.ScalarAffineTerm(-1.0, x[i])], 0.0),
+                MOI.ScalarAffineFunction([MOI.ScalarAffineTerm(1.0, aux[k]), MOI.ScalarAffineTerm(-1.0, x[i])], 0.0),
                 MOI.GreaterThan(0.0)
             )
 
-            # Add the second row for the absolute value constraint: d_k + x_i >= 0
+            # Add the second row for the absolute value constraint: aux_k + x_i >= 0
             c2 = MOI.add_constraint(
                 optModel,
-                MOI.ScalarAffineFunction([MOI.ScalarAffineTerm(1.0, d[k]), MOI.ScalarAffineTerm(1.0, x[i])], 0.0),
+                MOI.ScalarAffineFunction([MOI.ScalarAffineTerm(1.0, aux[k]), MOI.ScalarAffineTerm(1.0, x[i])], 0.0),
                 MOI.GreaterThan(0.0)
             )
-            
-            push!(dConstraints, (c1, c2))
+
+            push!(auxConstraints, (c1, c2))
         end
     end
 
     # use_modify = false to set a new objective each iteration without modifying the model structure
-    return FrankWolfe.MathOptLMO(optModel, false), dConstraints  # might be slower, but safer
+    return FrankWolfe.MathOptLMO(optModel, false), auxConstraints  # might be slower, but safer
 end
 
-# Updates the auxiliary d-block's constraint bounds in place for a new xRound
+# Updates the auxiliary block's constraint bounds in place for a new xRound
 function MOIupdateRounding!(
     lmo::FrankWolfe.MathOptLMO,
-    dConstraints::Vector{Tuple{MOI.ConstraintIndex, MOI.ConstraintIndex}},
+    auxConstraints::Vector{Tuple{MOI.ConstraintIndex, MOI.ConstraintIndex}},
     gIntIdx::Vector{Int},
     xRound::Vector{Float64}
 )
     for (k, i) in enumerate(gIntIdx)
-        c1, c2 = dConstraints[k]
+        c1, c2 = auxConstraints[k]
         MOI.set(lmo.o, MOI.ConstraintSet(), c1, MOI.GreaterThan(-xRound[i]))
         MOI.set(lmo.o, MOI.ConstraintSet(), c2, MOI.GreaterThan(xRound[i]))
     end

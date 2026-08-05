@@ -1,6 +1,15 @@
-# Rounding threshold generator
+# Rounding threshold generator (from Bertacco et al., 2007)
 function getRoundingThreshold(random::Bool)
-    return random ? rand() : 0.5
+    if !random
+        return 0.5
+    end
+
+    omega = rand()
+    if omega <= 0.5
+        return 2 * omega * (1 - omega)
+    else
+        return 1 - 2 * omega * (1 - omega)
+    end
 end
 
 function roundSolution!(
@@ -9,6 +18,7 @@ function roundSolution!(
     intIdx::Vector{Int},
     randRound::Bool
 )
+    xRound .= x  # refresh continuous/inactive-stage entries from the current LP solution
     threshold = getRoundingThreshold(randRound)
     for i in intIdx
         xRound[i] = floor(x[i] + threshold)
@@ -29,10 +39,10 @@ function perturb(
     avgFlips::Int,
     verbose::Bool
 )
-    fracVars = [(abs(xRound[i] - x[i]), i) for i in intIdx if SCIP.SCIPisEQ(scip, xRound[i], x[i]) == SCIP.FALSE]
+    fracVars = [(round(abs(xRound[i] - x[i]), digits=6), i) for i in intIdx if SCIP.SCIPisEQ(scip, xRound[i], x[i]) == SCIP.FALSE]
+
     if isempty(fracVars)
-        # xRound already equals x on every integer variable: there is nothing to perturb.
-        return false
+        return 0
     end
     sort!(fracVars, rev=true)
 
@@ -53,7 +63,27 @@ function perturb(
         end
     end
 
-    return true
+    return nFracFlips
+end
+
+# Randomize a single general integer within its domain, biased away from its current value once near a bound
+function randomizeGeneralInt!(xRound::Vector{Float64}, i::Int, lpCols::Vector{Ptr{SCIP.SCIP_COL}})
+    var = SCIP.SCIPcolGetVar(lpCols[i])
+    lb = SCIP.SCIPvarGetLbLocal(var)
+    ub = SCIP.SCIPvarGetUbLocal(var)
+    r = rand()
+
+    newVal = if (ub - lb) < DEF_BIGBIGM
+        floor(lb + (1 + ub - lb) * r)
+    elseif (xRound[i] - lb) < DEF_BIGM
+        lb + (2 * DEF_BIGM - 1) * r
+    elseif (ub - xRound[i]) < DEF_BIGM
+        ub - (2 * DEF_BIGM - 1) * r
+    else
+        xRound[i] + (2 * DEF_BIGM - 1) * r - DEF_BIGM
+    end
+
+    xRound[i] = clamp(floor(newVal), lb, ub)
 end
 
 function restart(
@@ -64,14 +94,14 @@ function restart(
     binIdx::Vector{Int},
     gIntIdx::Vector{Int},
     lpCols::Vector{Ptr{SCIP.SCIP_COL}},
-    avgFlips::Int
+    avgFlips::Int,
+    verbose::Bool
 )
     changed = 0
 
     # Binary variables
     for i in binIdx
         r = rand() - 0.47  # [-0.47, 0.53)
-
         if r > 0 && SCIP.SCIPisEQ(scip, xRound[i], prevRound[i]) == SCIP.TRUE  # stuck variable
             sigma = abs(xRound[i] - x[i])
             if sigma + r > 0.5
@@ -81,6 +111,20 @@ function restart(
         end
     end
 
+    # General integer variables (stage 2 only)
+    # TODO: compare the fixed avgFlips to an adaptive count that grows with the number of restarts
+    if !isempty(gIntIdx)
+        for _ in 1:avgFlips
+            i = gIntIdx[rand(1:length(gIntIdx))]
+            prevVal = xRound[i]
+            randomizeGeneralInt!(xRound, i, lpCols)
+            if SCIP.SCIPisEQ(scip, xRound[i], prevVal) == SCIP.FALSE
+                changed += 1
+            end
+        end
+    end
+
+    # Safety net: only shake binaries aggressively if nothing changed above
     if changed == 0
         for i in binIdx
             if rand() > 0.5
@@ -90,29 +134,9 @@ function restart(
         end
     end
 
-    # General integer variables
-    if !isempty(gIntIdx)
-        for _ in 1:avgFlips
-            k = rand(1:length(gIntIdx))
-            i = gIntIdx[k]
-
-            var = SCIP.SCIPcolGetVar(lpCols[i])
-            lb = SCIP.SCIPvarGetLbLocal(var)
-            ub = SCIP.SCIPvarGetUbLocal(var)
-            r = rand()
-
-            newVal = if (ub - lb) < DEF_BIGBIGM
-                floor(lb + (1 + ub - lb) * r)
-            elseif (xRound[i] - lb) < DEF_BIGM
-                lb + (2 * DEF_BIGM - 1) * r
-            elseif (ub - xRound[i]) < DEF_BIGM
-                ub - (2 * DEF_BIGM - 1) * r
-            else
-                xRound[i] + (2 * DEF_BIGM - 1) * r - DEF_BIGM
-            end
-
-            xRound[i] = clamp(floor(newVal), lb, ub)
-            changed += 1
-        end
+    if verbose
+        println("Restarting: $changed variables changed")
     end
+
+    return changed
 end

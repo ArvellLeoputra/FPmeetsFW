@@ -1,3 +1,4 @@
+# Build a gradient function for the specified indices and formula
 function buildGradFunction(intIdx::Vector{Int}, gradFormula)
     return (storage, x) -> begin
         storage .= 0.0
@@ -8,14 +9,31 @@ function buildGradFunction(intIdx::Vector{Int}, gradFormula)
     end
 end
 
+# Debug-only wrapper around grad!: reports whenever a variable's gradient sign flips between
+# consecutive evaluations (prevGrad holds the previous gradient). Only used at verbose >= 2.
+function buildGradCheck(grad!, prevGrad, intIdx, xRound)
+    return (storage, x) -> begin
+        grad!(storage, x)
+        for i in intIdx
+            if abs(x[i] - xRound[i]) > DEF_INT_TOLERANCE &&
+                abs(prevGrad[i]) > DEF_INT_TOLERANCE && 
+                sign(storage[i]) != sign(prevGrad[i])
+                @printf("  [grad flip] var=%d x=%.6f xRound=%.6f old=%.4f new=%.4f\n",
+                    i, x[i], xRound[i], prevGrad[i], storage[i])
+            end
+        end
+        copyto!(prevGrad, storage)
+        return storage
+    end
+end
+
 function buildFWFunctions(
     norm::Symbol,
     binIdx::Vector{Int},
     gIntIdx::Vector{Int},
+    intIdx::Vector{Int},
     xRound::Vector{Float64}
 )
-    intIdx = [binIdx; gIntIdx]
-
     if norm == :manhattan
         ncols = length(xRound)
         nGInt = length(gIntIdx)
@@ -29,9 +47,9 @@ function buildFWFunctions(
         end
 
         f = xExt -> begin
-            binaryDistance = sum(binTerm(i, xExt) for i in binIdx; init=0.0)
-            generalIntDistance = sum(xExt[ncols + k] for k in 1:nGInt; init=0.0)
-            binaryDistance + generalIntDistance
+            binDist = sum(binTerm(i, xExt) for i in binIdx; init = 0.0)
+            gIntDist = sum(xExt[ncols + k] for k in 1:nGInt; init = 0.0)
+            binDist + gIntDist
         end
 
         grad! = (storage, xExt) -> begin
@@ -46,22 +64,25 @@ function buildFWFunctions(
             return storage
         end
 
-        dist = (x, y) -> sum(abs(x[i] - y[i]) for i in intIdx)
+        dist = (x, y) -> sum(abs(x[i] - y[i]) for i in intIdx; init = 0.0)
+
     elseif norm == :smoothManhattan
-        f = x -> sum(sqrt((x[i] - xRound[i])^2 + DEF_INT_TOLERANCE) for i in intIdx)
+        f = x -> sum(sqrt((x[i] - xRound[i])^2 + DEF_INT_TOLERANCE) for i in intIdx; init = 0.0)
 
         grad! = buildGradFunction(intIdx, (i, x) -> begin
             d = x[i] - xRound[i]
             d / sqrt(d^2 + DEF_INT_TOLERANCE)
         end)
 
-        dist = (x, y) -> sum(sqrt((x[i] - y[i])^2 + DEF_INT_TOLERANCE) for i in intIdx)
+        dist = (x, y) -> sum(sqrt((x[i] - y[i])^2 + DEF_INT_TOLERANCE) for i in intIdx; init = 0.0)
+    
     elseif norm == :euclidean
-        f = x -> 0.5 * sum((x[i] - xRound[i])^2 for i in intIdx)
+        f = x -> 0.5 * sum((x[i] - xRound[i])^2 for i in intIdx; init = 0.0)
 
         grad! = buildGradFunction(intIdx, (i, x) -> x[i] - xRound[i])
 
-        dist = (x, y) -> 0.5 * sum((x[i] - y[i])^2 for i in intIdx)
+        dist = (x, y) -> 0.5 * sum((x[i] - y[i])^2 for i in intIdx; init = 0.0)
+    
     else
         error("Unknown norm: $norm. Choose from :euclidean, :manhattan, :smoothManhattan")
     end
@@ -69,19 +90,19 @@ function buildFWFunctions(
     return f, grad!, dist
 end
 
-function buildLineSearch(lineSearch::Symbol)
-    if lineSearch == :unitary
+function buildLineSearch(fwStepSize::Symbol)
+    if fwStepSize == :unitary
         FrankWolfe.FixedStep(1.0)
-    elseif lineSearch == :agnostic
+    elseif fwStepSize == :agnostic
         FrankWolfe.Agnostic()
-    elseif lineSearch == :backtracking
+    elseif fwStepSize == :backtracking
         FrankWolfe.Backtracking()
-    elseif lineSearch == :secant
+    elseif fwStepSize == :secant
         FrankWolfe.Secant()
-    elseif lineSearch == :adaptive
+    elseif fwStepSize == :adaptive
         FrankWolfe.Adaptive()
     else
-        error("Unknown line search: $lineSearch. Choose from :agnostic, :backtracking, :secant, :adaptive")
+        error("Unknown line search: $fwStepSize. Choose from :unitary, :agnostic, :backtracking, :secant, :adaptive")
     end
 end
 

@@ -34,17 +34,17 @@ function buildStats(scip::SCIP.SCIPData, heur::FPFWHeuristic, totalTime::Float64
 
     status = SCIP.SCIPgetStatus(scip)
     if status == SCIP.SCIP_STATUS_OPTIMAL
-        stats.exitReason = :scip_optimal
+        stats.exitReason = SCIP_OPTIMAL
     elseif status == SCIP.SCIP_STATUS_INFEASIBLE
-        stats.exitReason = :scip_infeasible
+        stats.exitReason = SCIP_INFEASIBLE
     elseif status == SCIP.SCIP_STATUS_UNBOUNDED
-        stats.exitReason = :scip_unbounded
+        stats.exitReason = SCIP_UNBOUNDED
     elseif status == SCIP.SCIP_STATUS_TIMELIMIT
-        stats.exitReason = :scip_time_limit
+        stats.exitReason = SCIP_TIME_LIMIT
     elseif status == SCIP.SCIP_STATUS_NODELIMIT
-        stats.exitReason = :scip_node_limit
+        stats.exitReason = SCIP_NODE_LIMIT
     else
-        stats.exitReason = :scip_unknown
+        stats.exitReason = SCIP_UNKNOWN
     end
 
     stats.primalIntegral = computePrimalIntegral(stats.primalEvents, totalTime)
@@ -52,7 +52,14 @@ function buildStats(scip::SCIP.SCIPData, heur::FPFWHeuristic, totalTime::Float64
     return stats
 end
 
-function printRunInfo(scip::SCIP.SCIPData)
+function recordSolutionFound!(stats, exitReason, scip, heurStartTime)
+    stats.solutionFound = true
+    stats.exitReason = exitReason
+    push!(stats.primalEvents, (timeElapsed(heurStartTime), min(1.0, Float64(SCIP.SCIPgetGap(scip)))))
+    return SCIP.SCIP_FOUNDSOL
+end
+
+function printRunInfo(scip::SCIP.SCIPData, config::FPFWConfig)
     name = unsafe_string(SCIP.SCIPgetProbName(scip))
     varCount = SCIP.SCIPgetNOrigVars(scip)
     binCount = SCIP.SCIPgetNBinVars(scip)
@@ -60,6 +67,7 @@ function printRunInfo(scip::SCIP.SCIPData)
     contCount = SCIP.SCIPgetNContVars(scip)
 
     printstyled("[run info]\n", color=:cyan)
+    println("runName = $(config.runName)")
     println("instance = $name")
     println("totalVars = $varCount")
     println("binaryVars = $binCount")
@@ -72,37 +80,42 @@ function printConfigs(config::FPFWConfig)
     println("norm = $(config.norm)")
     println("fwVariant = $(config.fwVariant)")
     println("fwMaxIterations = $(config.fwMaxIterations)")
-    println("lineSearch = $(config.lineSearch)")
+    println("fwStepSize = $(config.fwStepSize)")
     println("timeLimit = $(config.timeLimit)")
     println("randomizedRounding = $(config.randRound ? "enabled" : "disabled")")
     println("randomizedFeasibilityCheck = $(config.randFeasCheck ? "enabled" : "disabled")")
     println("fwWarmStart = $(config.fwWarmStart ? "enabled" : "disabled")")
     println("lmoWarmStart = $(config.lmoWarmStart ? "enabled" : "disabled")")
-    println("useSubMIP = $(config.useSubMIP ? "enabled" : "disabled")")
+    println("useDive = $(config.useDive ? "enabled" : "disabled")")
     println("presolve = $(config.presolve ? "enabled" : "disabled")")
     println("seed = $(config.seed)")
-    println("enablePlot = $(config.enablePlot ? "enabled" : "disabled")")
-    println("verbose = $(config.verbose ? "enabled" : "disabled")")
+    println("verbose = $(config.verbose)")
 end
 
 function printResults(stats::FPFWStats)
-    exitMsg = if stats.exitReason == :time_limit
+    exitMsg = if stats.exitReason == TIME_LIMIT
         "time limit reached"
-    elseif stats.exitReason == :infeasible_fw
+    elseif stats.exitReason == ITER_LIMIT
+        "iteration limit reached without a solution"
+    elseif stats.exitReason == INFEASIBLE_FW
         "FW returned a point outside the feasible polytope (numerical error)"
-    elseif stats.exitReason == :solution_found
-        "integer feasible solution accepted by SCIP at iteration $(stats.pumpIterations)"
-    elseif stats.exitReason == :rr_solution_found
+    elseif stats.exitReason == SOLUTION_ROUND
+        "integer feasible solution found by direct rounding at iteration $(stats.pumpIterations)"
+    elseif stats.exitReason == SOLUTION_DIVE
+        "integer feasible solution found by dive (integers fixed, LP solved) at iteration $(stats.pumpIterations)"
+    elseif stats.exitReason == SOLUTION_FWPROJ
+        "integer feasible solution found by FW projection at iteration $(stats.pumpIterations)"
+    elseif stats.exitReason == SOLUTION_RR
         "integer feasible solution found by randomized rounding at iteration $(stats.pumpIterations)"
-    elseif stats.exitReason == :scip_optimal
+    elseif stats.exitReason == SCIP_OPTIMAL
         "problem solved to optimality by SCIP before heuristic was called"
-    elseif stats.exitReason == :scip_infeasible
+    elseif stats.exitReason == SCIP_INFEASIBLE
         "LP is infeasible, thus MIP is infeasible"
-    elseif stats.exitReason == :scip_time_limit
+    elseif stats.exitReason == SCIP_TIME_LIMIT
         "time limit reached before heuristic was called"
-    elseif stats.exitReason == :scip_node_limit
+    elseif stats.exitReason == SCIP_NODE_LIMIT
         "SCIP node limit reached before heuristic was called"
-    elseif stats.exitReason == :scip_unbounded
+    elseif stats.exitReason == SCIP_UNBOUNDED
         "LP is unbounded, thus MIP is unbounded"
     else
         "unknown exit"
@@ -111,12 +124,13 @@ function printResults(stats::FPFWStats)
     printstyled("[result]\n", color=:cyan)
     println("primalBound = $(round(stats.primalBound, digits=4))")
     println("dualBound = $(round(stats.dualBound, digits=4))")
-    println("gap = $(@sprintf("%.2f %%", stats.gap * 100))")
+    gapStr = stats.gap >= 1e19 ? @sprintf("%.0e", stats.gap) : @sprintf("%.2f %%", stats.gap * 100)
+    println("gap = $gapStr")
     println("primalIntegral = $(round(stats.primalIntegral, digits=4))")
     println("solFound = $(stats.solutionFound)")
     println("totalTime = $(round(stats.totalTime, digits=2))s")
 
-    if !startswith(string(stats.exitReason), "scip_")
+    if !startswith(string(stats.exitReason), "SCIP_")
         println("totalHeurTime = $(round(stats.heurTime, digits=2))s")
         println("fwTime = $(round(stats.fwTime, digits=2))s")
         println("randRoundTime = $(round(stats.rrTime, digits=2))s")

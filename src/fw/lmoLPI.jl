@@ -1,14 +1,15 @@
+# The LMO's polytope (lmo.lpi) is built once per stage in buildLPILMO with a placeholder objective
 function buildLPILMO(
     scip::Ptr{SCIP.SCIP_},
     lpCols::Vector{Ptr{SCIP.SCIP_COL}},
     lpRows::Vector{Ptr{SCIP.SCIP_ROW}},
     colDict::Dict{Ptr{SCIP.SCIP_COL}, Int},
-    intIdx::Vector{Int},
     gIntIdx::Vector{Int},
-    norm::Symbol,  # only :manhattan gets the auxiliary d-block
+    norm::Symbol,  # only :manhattan gets the auxiliary block
+    stage::Int,
     ncols::Int32,
     nrows::Int32,
-    verbose::Bool
+    verbose::Int
 )
     # Create SCIPlpi instance
     lpiPtr = Ref{Ptr{SCIP.SCIP_LPI}}(C_NULL)
@@ -16,7 +17,7 @@ function buildLPILMO(
     SCIP.@SCIP_CALL SCIP.SCIPlpiCreate(lpiPtr, msghdlr, "lmo", SCIP.SCIP_OBJSEN_MINIMIZE)
     lpi = lpiPtr[]
 
-    obj = zeros(Cdouble, ncols)
+    obj = zeros(Cdouble, ncols)  # later set to the current gradient direction in compute_extreme_point
     lb = zeros(Cdouble, ncols)
     ub = zeros(Cdouble, ncols)
     inf = SCIP.SCIPlpiInfinity(lpi)
@@ -83,20 +84,19 @@ function buildLPILMO(
         nonzVals
     )
 
+    # Add auxiliary block columns for Manhattan norm
     if norm == :manhattan
         nGInt = length(gIntIdx)
-
-        dObj = ones(Cdouble, nGInt)
-        dLb = zeros(Cdouble, nGInt)
-        dUb = fill(SCIP.SCIPlpiInfinity(lpi), nGInt)
-
-        # Add auxiliary d-block columns for Manhattan norm
+        auxObj = ones(Cdouble, nGInt)
+        auxLb = zeros(Cdouble, nGInt)
+        auxUb = fill(SCIP.SCIPlpiInfinity(lpi), nGInt)
+        
         SCIP.@SCIP_CALL SCIP.SCIPlpiAddCols(
             lpi,
             Cint(nGInt),
-            dObj,
-            dLb,
-            dUb,
+            auxObj,
+            auxLb,
+            auxUb,
             C_NULL,
             Cint(0),
             C_NULL,
@@ -104,73 +104,76 @@ function buildLPILMO(
             C_NULL
         )
 
-        dLhs = Float64[]
-        dRhs = Float64[]
-        dBeg = Cint[]
-        dNonzIdx = Cint[]
-        dNonzVals = Float64[]
-        dOffset = Cint(0)
+        auxLhs = Float64[]
+        auxRhs = Float64[]
+        auxBeg = Cint[]
+        auxNonzIdx = Cint[]
+        auxNonzVals = Float64[]
+        auxOffset = Cint(0)
 
         for (k, i) in enumerate(gIntIdx)
-            dCol = Cint(ncols + k - 1)  # 0-based: d columns follow the original ncols
+            auxCol = Cint(ncols + k - 1)  # 0-based: aux columns follow the original ncols
             xCol = Cint(i - 1)
 
-            # Add the first row for the absolute value constraint: d_k - x_i >= 0
-            push!(dLhs, 0.0)
-            push!(dRhs, inf)
-            push!(dBeg, dOffset)
-            push!(dNonzIdx, dCol)
-            push!(dNonzVals, 1.0)
-            push!(dNonzIdx, xCol)
-            push!(dNonzVals, -1.0)
-            dOffset += 2
+            # Add the first row for the absolute value constraint: aux_k - x_i >= 0
+            push!(auxLhs, 0.0)
+            push!(auxRhs, inf)
+            push!(auxBeg, auxOffset)
+            push!(auxNonzIdx, auxCol)
+            push!(auxNonzVals, 1.0)
+            push!(auxNonzIdx, xCol)
+            push!(auxNonzVals, -1.0)
+            auxOffset += 2
 
-            # Add the second row for the absolute value constraint: d_k + x_i >= 0
-            push!(dLhs, 0.0)
-            push!(dRhs, inf)
-            push!(dBeg, dOffset)
-            push!(dNonzIdx, dCol)
-            push!(dNonzVals, 1.0)
-            push!(dNonzIdx, xCol)
-            push!(dNonzVals, 1.0)
-            dOffset += 2
+            # Add the second row for the absolute value constraint: aux_k + x_i >= 0
+            push!(auxLhs, 0.0)
+            push!(auxRhs, inf)
+            push!(auxBeg, auxOffset)
+            push!(auxNonzIdx, auxCol)
+            push!(auxNonzVals, 1.0)
+            push!(auxNonzIdx, xCol)
+            push!(auxNonzVals, 1.0)
+            auxOffset += 2
         end
 
         SCIP.@SCIP_CALL SCIP.SCIPlpiAddRows(
             lpi,
             Cint(2 * nGInt),
-            dLhs,
-            dRhs,
+            auxLhs,
+            auxRhs,
             C_NULL,
-            dOffset,
-            dBeg,
-            dNonzIdx,
-            dNonzVals
+            auxOffset,
+            auxBeg,
+            auxNonzIdx,
+            auxNonzVals
         )
     else
         nGInt = 0
     end
 
-    totalCols = ncols + nGInt
-    totalRows = nrows + 2 * nGInt
+    nlmoCols = ncols + nGInt
+    nlmoRows = nrows + 2 * nGInt
 
     ncolsRef = Ref{Cint}(0)
     nrowsRef = Ref{Cint}(0)
     SCIP.SCIPlpiGetNCols(lpi, ncolsRef)
     SCIP.SCIPlpiGetNRows(lpi, nrowsRef)
-    @assert ncolsRef[] == totalCols "LPI ncols $(ncolsRef[]) != ncols $totalCols"
-    @assert nrowsRef[] == totalRows "LPI nrows $(nrowsRef[]) != nrows $totalRows"
+    @assert ncolsRef[] == nlmoCols "LPI ncols $(ncolsRef[]) != LMO ncols $nlmoCols"
+    @assert nrowsRef[] == nlmoRows "LPI nrows $(nrowsRef[]) != LMO nrows $nlmoRows"
 
-    return BaseLMO(scip, lpi, Int32(totalCols), Int32(totalRows), intIdx, verbose)
+    if verbose > 1
+        printstyled("[LMO] ", color=:magenta)
+        @printf("Stage %d: ncols=%d (orig=%d aux=%d) nrows=%d (orig=%d aux=%d)\n",
+            stage, nlmoCols, ncols, nGInt, nlmoRows, nrows, 2 * nGInt)
+    end
+
+    return LPILMO(lpi, nlmoCols, nlmoRows, nrows, verbose)
 end
 
 # Update the rounding values in the LMO's LPI
-function LPIupdateRounding!(lmo::BaseLMO, gIntIdx::Vector{Int}, xRound::Vector{Float64})
-    nGInt = length(gIntIdx)
-
-    nDRows = 2 * nGInt
-    origNrows = lmo.nrows - nDRows  # d-rows were appended after the original nrows rows
-    ind = Cint.(origNrows:(origNrows + nDRows - 1))
+function LPIupdateRounding!(lmo::LPILMO, gIntIdx::Vector{Int}, xRound::Vector{Float64})
+    nAuxRows = 2 * length(gIntIdx)
+    ind = Cint.(lmo.origNrows:(lmo.origNrows + nAuxRows - 1))
     lhs = Float64[]
     rhs = Float64[]
     inf = SCIP.SCIPlpiInfinity(lmo.lpi)
@@ -182,7 +185,7 @@ function LPIupdateRounding!(lmo::BaseLMO, gIntIdx::Vector{Int}, xRound::Vector{F
         push!(rhs, inf)
     end
 
-    SCIP.@SCIP_CALL SCIP.SCIPlpiChgSides(lmo.lpi, Cint(nDRows), ind, lhs, rhs)
+    SCIP.@SCIP_CALL SCIP.SCIPlpiChgSides(lmo.lpi, Cint(nAuxRows), ind, lhs, rhs)
 end
 
 # Extract LP basis from SCIP's internal LP solver
@@ -204,12 +207,12 @@ function LPIgetBase(scip::Ptr{SCIP.SCIP_}, ncols::Int32, nrows::Int32)
 end
 
 # Set LP basis
-function LPIsetBase(lmo::BaseLMO, cstat::Vector{Cint}, rstat::Vector{Cint})
+function LPIsetBase(lmo::LPILMO, cstat::Vector{Cint}, rstat::Vector{Cint})
     SCIP.@SCIP_CALL SCIP.SCIPlpiSetBase(lmo.lpi, cstat, rstat)
 end
 
 # Initialize LMO basis from SCIP's internal LP basis
-function LPIinitBase(scip::Ptr{SCIP.SCIP_}, lmo::BaseLMO, ncols::Int32, nrows::Int32)
+function LPIinitBase(scip::Ptr{SCIP.SCIP_}, lmo::LPILMO, ncols::Int32, nrows::Int32)
     cstatOrig, rstatOrig = LPIgetBase(scip, ncols, nrows)
     if lmo.ncols == ncols && lmo.nrows == nrows
         LPIsetBase(lmo, cstatOrig, rstatOrig)
@@ -222,7 +225,9 @@ function LPIinitBase(scip::Ptr{SCIP.SCIP_}, lmo::BaseLMO, ncols::Int32, nrows::I
     end
 end
 
-function FrankWolfe.compute_extreme_point(lmo::BaseLMO, direction::AbstractVector; kwargs...)
+# Compute the extreme point of the LMO's polytope in the direction of the given gradient
+# Called in each Frank-Wolfe iteration
+function FrankWolfe.compute_extreme_point(lmo::LPILMO, direction::AbstractVector; kwargs...)
     # Set objective
     SCIP.@SCIP_CALL SCIP.SCIPlpiChgObj(
         lmo.lpi,
@@ -244,8 +249,8 @@ function FrankWolfe.compute_extreme_point(lmo::BaseLMO, direction::AbstractVecto
     simplexIter = Ref{Cint}(0)
     SCIP.@SCIP_CALL SCIP.SCIPlpiGetIterations(lmo.lpi, simplexIter)
 
-    # Skip the verbose output if the LMO is not set to verbose or if no simplex iterations were performed
-    verbosed = lmo.verbose && simplexIter[] > 0
+    # Per-solve basis diagnostics are fine-grained (level 3); skip if no simplex iterations were performed
+    verbosed = lmo.verbose >= 2 && simplexIter[] > 0
 
     if verbosed
         # @printf("LMO direction: pos=%d neg=%d zeros=%d\n",
@@ -277,12 +282,11 @@ function FrankWolfe.compute_extreme_point(lmo::BaseLMO, direction::AbstractVecto
         )
 
         if verbosed
-            nFracAll = countFracVars(lmo.scip, lmo.intIdx, solVector)
-            @printf("LMO solution: nFrac=%d obj=%.4f\n", nFracAll, obj[])
+            @printf("LMO solution: obj=%.4f\n", obj[])
         end
-        
+
         return solVector
     else
-        error("BaseLMO: LP not primal feasible after dual simplex solve")
+        error("LPILMO: LP not primal feasible after dual simplex solve")
     end
 end

@@ -1,6 +1,6 @@
 # Fix integer variables to xRound and solve the LP to adjust continuous variables
 # Fallback when xRound alone is not accepted as a feasible MIP solution
-function subMIPsolve(
+function diveSolve(
     scip::Ptr{SCIP.SCIP_},
     lpCols::Vector{Ptr{SCIP.SCIP_COL}},
     intIdx::Vector{Int},
@@ -36,6 +36,7 @@ function subMIPsolve(
     end
 end
 
+# Submit a solution to SCIP, returning true if accepted, false otherwise
 function submitSolution(
     scip::Ptr{SCIP.SCIP_},
     heurPtr::Ptr{SCIP.SCIP_HEUR},

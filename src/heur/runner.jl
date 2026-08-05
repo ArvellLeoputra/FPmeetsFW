@@ -10,7 +10,7 @@ function runInstance(fileName::String, config::FPFWConfig)
 
     SCIP.SCIPreadProb(scip, fileName, C_NULL)
 
-    printRunInfo(scip)
+    printRunInfo(scip, config)
     printConfigs(config)
 
     heur = FPFWHeuristic(config, FPFWRunData())
