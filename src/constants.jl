@@ -8,6 +8,9 @@ const DEF_FW_TOLERANCE = 1e-7
 # change is floating-point noise, not a real crossing (used by the debug grad-flip detector)
 const DEF_GRAD_FLIP_TOL = 1e-3
 
+# SCIP's own limits/time, set effectively unbounded so it never cuts the solve off early
+const DEF_SCIP_TIME_LIMIT = 1000000
+
 # Perturbation and restart parameters
 const DEF_MAX_STAGNATION = 5       # Maximum number of iterations without a real (>= threshold) improvement before perturbing
 const DEF_MIN_IMPROVEMENT = 0.10   # Relative improvement in projObj required to reset the stagnation counter

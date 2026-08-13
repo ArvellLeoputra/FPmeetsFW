@@ -14,7 +14,7 @@ The fields can be set via a configuration file or command-line arguments.
     fwMaxIterations::Int = 1
     "step size strategy for the Frank-Wolfe algorithm"
     fwStepSize::Symbol = :unitary
-    "total solving time budget in seconds (SCIP + heuristic)"
+    "time budget in seconds for the FPFW heuristic only"
     timeLimit::Float64 = 300.0
     "pump rounding step: use a randomized threshold (Bertacco et al., 2007)"
     randRound::Bool = false
@@ -74,8 +74,10 @@ Used for logging and reporting purposes.
     primalIntegral::Float64 = 0.0
     primalEvents::Vector{Tuple{Float64, Float64}} = Tuple{Float64, Float64}[]
 
-    "time breakdown in seconds: total solve, heuristic wall time, randomized feasibility-check time, FW-solve time"
+    "time breakdown in seconds: total solve, SCIP's own time before the heuristic was called
+    (reading, presolve, root LP), heuristic wall time, randomized feasibility-check time, FW-solve time"
     totalTime::Float64 = 0.0
+    rootTime::Float64 = 0.0
     heurTime::Float64 = 0.0
     rrTime::Float64 = 0.0
     fwTime::Float64 = 0.0

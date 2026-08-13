@@ -9,8 +9,7 @@ structure.md
 miplib_binary/
 miplib_full/
 slurm_script/
-plots/
-testcase/zigzag_euclidean.mps
+misc/
 
 # Julia
 Manifest.toml

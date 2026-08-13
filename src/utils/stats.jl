@@ -30,6 +30,7 @@ function buildStats(scip::SCIP.SCIPData, heur::FPFWHeuristic, totalTime::Float64
     stats.gap = Float64(SCIP.SCIPgetGap(scip))
 
     stats.totalTime = totalTime
+    stats.rootTime = totalTime
     stats.solutionFound = SCIP.SCIPgetNSols(scip) > 0
 
     status = SCIP.SCIPgetStatus(scip)
@@ -131,9 +132,10 @@ function printResults(stats::FPFWStats)
     println("primalIntegral = $(round(stats.primalIntegral, digits=4))")
     println("solFound = $(stats.solutionFound)")
     println("totalTime = $(round(stats.totalTime, digits=2))s")
+    println("rootTime = $(round(stats.rootTime, digits=2))s")
 
     if !startswith(string(stats.exitReason), "SCIP_")
-        println("totalHeurTime = $(round(stats.heurTime, digits=2))s")
+        println("heurTime = $(round(stats.heurTime, digits=2))s")
         println("fwTime = $(round(stats.fwTime, digits=2))s")
         println("randRoundTime = $(round(stats.rrTime, digits=2))s")
         println("pumpIterations = $(stats.pumpIterations)")

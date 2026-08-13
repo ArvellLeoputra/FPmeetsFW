@@ -123,6 +123,7 @@ function minimal_setup(;
     disable_all_heuristics!(model)
     disable_cuts!(model)
     disable_root_node_propagation!(model)
+    disable_strong_branching_lookahead!(model)
 
     if !presolve
         disable_presolving!(model)

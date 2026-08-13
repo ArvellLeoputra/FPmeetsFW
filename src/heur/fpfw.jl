@@ -122,29 +122,20 @@ function SCIP.find_primal_solution(
     lpCols, lpRows, colDict, binIdx, gIntIdx, initSol = getLPData(scip, ncols, nrows)
     intIdx = [binIdx; gIntIdx]
 
-    # Sanity check: can still legitimately mismatch on an intermediate LP; skip and retry
-    dualBound = SCIP.SCIPgetDualbound(scip)
-    initObj = origObjective(scip, lpCols, initSol, ncols)
-    if SCIP.SCIPisFeasEQ(scip, initObj, dualBound) == SCIP.FALSE
-        if config.verbose >= 1
-            printstyled("[heuristic skipped]\n", color=:yellow)
-            @printf("initObj (%.6f) != dualBound (%.6f) -- LP not final yet, retrying next call\n", initObj, dualBound)
-        end
-        return (SCIP.SCIP_OKAY, SCIP.SCIP_DIDNOTRUN)
-    end
-
     data.called += 1
 
     # Time tracking
     heurStartTime = time()
-    scipTime = SCIP.SCIPgetSolvingTime(scip)
-    heurTimeLimit = config.timeLimit - scipTime
+    rootTime = SCIP.SCIPgetSolvingTime(scip)
+    heurTimeLimit = config.timeLimit
+    stats.rootTime = rootTime
 
     # Log initial LP solve info
     if config.verbose >= 1
+        initObj = origObjective(scip, lpCols, initSol, ncols)
         lpRootIter = SCIP.SCIPgetNLPIterations(scip)
         nFracVars = SCIP.SCIPgetNLPBranchCands(scip)
-        printInitialSolveInfo(initObj, intIdx, scipTime, lpRootIter, nFracVars)
+        printInitialSolveInfo(initObj, intIdx, rootTime, lpRootIter, nFracVars)
     end
 
     # Log initial basis info
