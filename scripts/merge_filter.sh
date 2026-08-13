@@ -4,15 +4,15 @@
 # with one shared header line.
 #
 # Usage:
-#   bash scripts/merge_filter_tasks.sh <taskDir> <outCsv>
+#   bash scripts/merge_filter.sh <taskDir> <outCsv>
 #
 # Example:
-#   bash scripts/merge_filter_tasks.sh misc/filter_tasks misc/filter_report.csv
+#   bash scripts/merge_filter.sh misc/filter_tasks misc/filter_report.csv
 
 set -euo pipefail
 
 if [ $# -lt 2 ]; then
-    echo "Usage: bash scripts/merge_filter_tasks.sh <taskDir> <outCsv>" >&2
+    echo "Usage: bash scripts/merge_filter.sh <taskDir> <outCsv>" >&2
     exit 1
 fi
 

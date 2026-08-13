@@ -206,7 +206,7 @@ end
 # 1-based position in the sorted instance directory listing, and writes exactly one
 # CSV row (with header) to outDir/task_<taskIndex>.csv. Meant for SLURM array jobs:
 # one array task = one instance, so all instances run in parallel instead of
-# sequentially. Combine the per-task files afterward with scripts/merge_filter_tasks.sh.
+# sequentially. Combine the per-task files afterward with scripts/merge_filter.sh.
 function runTask(instanceDir::String, outDir::String, rootTimeLimit::Float64, taskIndex::Int)
     files = findInstanceFiles(instanceDir)
     if taskIndex < 1 || taskIndex > length(files)
