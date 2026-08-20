@@ -1,11 +1,8 @@
-# Filters a directory of MIPLIB 2017 benchmark instances against the criteria used 
-# to justify the benchmark selection in Section 5.3.
+# Filtering MIPLIB 2017 benchmark instances
 #
-# For each instance this script solves ONLY the root node (node_limit=1) with
-# all heuristics, cuts, and separators disabled (minimal_setup), with presolve
-# enabled (matching the real FPFW run config in settings/fpfw.cfg), and flags
-# instances that should be EXCLUDED from the FPFW benchmark if the root solve
-# shows:
+# For each instance solves ONLY the root node (node_limit=1) with
+# minimal_setup and presolve enabled and flags instances that should
+# be EXCLUDED from the FPFW benchmark if the root solve shows:
 #   - no binary/general-integer variables (pure LP)
 #   - root node already solved to optimality (nothing for a primal heuristic to do)
 #   - infeasible or unbounded
@@ -70,6 +67,11 @@ end
 # heuristics, cuts, and separators disabled (minimal_setup), either with or
 # without presolve.
 function solveRoot(filePath::String, rootTimeLimit::Float64, presolve::Bool)::RootSolve
+    # Clock starts before model setup/file read, matching runner.jl's globalStartTime
+    # placement, so rootTime here is measured over the same window the real FPFW run's
+    # totalTime covers (setup + read + solve), not just the SCIPsolve call.
+    startT = time()
+
     model = minimal_setup(time_limit=rootTimeLimit, node_limit=1, presolve=presolve)
     backend = JuMP.unsafe_backend(model)
     scip = backend.inner
@@ -90,7 +92,6 @@ function solveRoot(filePath::String, rootTimeLimit::Float64, presolve::Bool)::Ro
     nInt  = SCIP.SCIPgetNIntVars(scip)
     nCont = SCIP.SCIPgetNContVars(scip)
 
-    startT = time()
     SCIP.SCIPsolve(scip)
     rootTime = time() - startT
 

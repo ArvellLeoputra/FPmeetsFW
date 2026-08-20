@@ -62,7 +62,7 @@ echo "" >> "$DETAILED"
 
 echo "Test cases with solutions found:" > "$FOUND"
 echo "=====================================================================================================================================" >> "$FOUND"
-printf "%-35s %-8s %-8s %-8s %-12s %-10s %-10s %-10s %-10s %-16s %-10s\n" "Instance" "Bin" "Int" "Cont" "Time (s)" "FP Iters" "FW Iters" "Restarts" "Perturbs" "Objective" "Gap (%)" >> "$FOUND"
+printf "%-35s %-8s %-8s %-8s %-12s %-12s %-10s %-10s %-10s %-10s %-16s %-10s\n" "Instance" "Bin" "Int" "Cont" "Total(s)" "HeurT(s)" "FP Iters" "FW Iters" "Restarts" "Perturbs" "Objective" "Gap (%)" >> "$FOUND"
 echo "=====================================================================================================================================" >> "$FOUND"
 
 echo "Failed/Interrupted runs:" > "$FAILED"
@@ -93,6 +93,7 @@ failed_binary=0
 failed_ginteger=0
 
 declare -a found_times=()
+declare -a found_heur_times=()
 declare -a found_fw_iters=()
 declare -a found_fp_iters=()
 declare -a found_restarts=()
@@ -108,7 +109,7 @@ for output_file in "$OUT_DIR"/*.out; do
     integer_vars=$(grep "integerVars =" "$output_file" | tail -1 | awk '{print $3}')
     continuous_vars=$(grep "continuousVars =" "$output_file" | tail -1 | awk '{print $3}')
     total_time=$(grep "^totalTime =" "$output_file" | tail -1 | awk '{print $3}' | tr -d 's')
-    heur_time=$(grep "^totalHeurTime =" "$output_file" | tail -1 | awk '{print $3}' | tr -d 's')
+    heur_time=$(grep -E "^(totalHeurTime|heurTime) =" "$output_file" | tail -1 | awk '{print $3}' | tr -d 's')
     fw_time=$(grep "fwTime =" "$output_file" | tail -1 | awk '{print $3}' | tr -d 's')
     fp_iterations=$(grep "pumpIterations =" "$output_file" | tail -1 | awk '{print $3}')
     fw_iterations=$(grep "fwIterations =" "$output_file" | tail -1 | awk '{print $3}')
@@ -173,13 +174,14 @@ for output_file in "$OUT_DIR"/*.out; do
         this_was_found=1
         [ "$exit_reason_code" = "SOLUTION_RR" ] && rr_found_count=$((rr_found_count + 1))
         found_times+=("$total_time")
+        found_heur_times+=("${heur_time:-0}")
         found_fw_iters+=("$fw_iterations")
         found_fp_iters+=("$fp_iterations")
         found_restarts+=("$restarts")
         found_perturbations+=("$perturbations")
         fmt_objective=$(fmt_obj "$objective")
-        printf "%-35s %-8s %-8s %-8s %-12s %-10s %-10s %-10s %-10s %-16s %-10s\n" \
-            "$instance_name" "$binary_vars" "${integer_vars:-0}" "${continuous_vars:-0}" "$total_time" "$fp_iterations" "$fw_iterations" "$restarts" "$perturbations" "$fmt_objective" "$gap" >> "$FOUND"
+        printf "%-35s %-8s %-8s %-8s %-12s %-12s %-10s %-10s %-10s %-10s %-16s %-10s\n" \
+            "$instance_name" "$binary_vars" "${integer_vars:-0}" "${continuous_vars:-0}" "$total_time" "${heur_time:-N/A}" "$fp_iterations" "$fw_iterations" "$restarts" "$perturbations" "$fmt_objective" "$gap" >> "$FOUND"
 
     elif [ "$exit_reason_code" = "INFEASIBLE_FW" ]; then
         failure_reason="FW_INFEASIBLE"
@@ -208,6 +210,7 @@ for output_file in "$OUT_DIR"/*.out; do
     printf "  %-18s%s\n" "Continuous Vars:" "${continuous_vars}" >> "$DETAILED"
     printf "  %-18s%s\n" "Solution found:" "${solution_found}" >> "$DETAILED"
     printf "  %-18s%s\n" "Total time:" "${total_time}s" >> "$DETAILED"
+    printf "  %-18s%s\n" "Heur time:" "${heur_time:-N/A}s" >> "$DETAILED"
     printf "  %-18s%s\n" "FP iterations:" "${fp_iterations}" >> "$DETAILED"
     printf "  %-18s%s\n" "FW iterations:" "${fw_iterations}" >> "$DETAILED"
     printf "  %-18s%s\n" "FW time:" "${fw_time}s" >> "$DETAILED"
@@ -229,6 +232,12 @@ if [ ${#found_times[@]} -gt 0 ]; then
         sum_time=$(awk -v s="$sum_time" -v v="$t" 'BEGIN {print s + v}')
     done
     avg_time=$(awk -v s="$sum_time" -v n="${#found_times[@]}" 'BEGIN {printf "%.2f", s / n}')
+
+    sum_heur_time=0
+    for t in "${found_heur_times[@]}"; do
+        sum_heur_time=$(awk -v s="$sum_heur_time" -v v="$t" 'BEGIN {print s + v}')
+    done
+    avg_heur_time=$(awk -v s="$sum_heur_time" -v n="${#found_heur_times[@]}" 'BEGIN {printf "%.2f", s / n}')
 
     sum_fw=0
     for fw in "${found_fw_iters[@]}"; do sum_fw=$((sum_fw + fw)); done
@@ -273,7 +282,8 @@ if [ ${#found_times[@]} -gt 0 ]; then
     echo ""
     echo "STATISTICS FOR SUCCESSFUL RUNS"
     echo "=========================================================="
-    echo "Average time:          ${avg_time}s"
+    echo "Average total time:    ${avg_time}s"
+    echo "Average heur time:     ${avg_heur_time}s"
     echo "Average FP iterations: $avg_fp"
     echo "Average FW iterations: $avg_fw"
     echo "Average perturbations: $avg_perturbations"

@@ -4,7 +4,7 @@
 
 PROJECT_DIR="/home/htc/aleoputra/project"
 FPFW_DIR="$PROJECT_DIR/FPmeetsFW"
-INSTANCE_DIR="$PROJECT_DIR/instances/miplib_full"  # UPDATE
+INSTANCE_DIR="$PROJECT_DIR/instances/miplib_selected"  # UPDATE
 COMP_RESULT="$PROJECT_DIR/compResult"
 CONFIG="$FPFW_DIR/settings/run3.cfg"
 
