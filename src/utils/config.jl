@@ -145,5 +145,8 @@ function loadConfig(args::Vector{String})
         end
     end
 
-    return fileName, buildFPFWConfig(params)
+    # resultsDir is an optional CLI-only key: the directory to write results.json into.
+    resultsDir = get(params, "resultsDir", "")
+
+    return fileName, buildFPFWConfig(params), resultsDir
 end

@@ -6,6 +6,7 @@ using FrankWolfe
 using Random
 using Printf
 using Dates
+using JSON
 import MathOptInterface
 const MOI = MathOptInterface
 

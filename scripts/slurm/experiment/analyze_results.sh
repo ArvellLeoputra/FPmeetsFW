@@ -1,15 +1,32 @@
 #!/bin/bash
 
-# Check results for a FP-FW variant. Usage: ./check.sh [cfgName] [folder]
+# Check results for a FP-FW variant. Usage: ./analyze_results.sh [cfgName] [folder]
 # cfgName defaults to "fpfw" (settings/fpfw.cfg), folder defaults to "fpfw_baseline"
 
-PROJECT_DIR="/home/htc/aleoputra/project"
+PROJECT_DIR="${PROJECT_DIR:-/home/htc/aleoputra/project}"
 FPFW_DIR="$PROJECT_DIR/FPmeetsFW"
 COMP_RESULT="$PROJECT_DIR/compResult"
 SETTINGS_DIR="$FPFW_DIR/settings"
 
 CFG_NAME="${1:-fpfw}"
-CONFIG="$SETTINGS_DIR/${CFG_NAME}.cfg"
+FOLDER="${2:-fpfw_baseline}"
+
+RESULT_DIR="$COMP_RESULT/$FOLDER"
+
+if ! command -v jq > /dev/null 2>&1; then
+    echo "Error: jq not found; required to parse results.json" >&2
+    exit 1
+fi
+
+# Prefer the config archived at submission time so results and settings stay
+# in sync even if settings/${CFG_NAME}.cfg has since been edited. Fall back
+# to the live settings file for runs submitted before this archiving existed.
+RUN_CONFIG="$RESULT_DIR/config.cfg"
+if [ -f "$RUN_CONFIG" ]; then
+    CONFIG="$RUN_CONFIG"
+else
+    CONFIG="$SETTINGS_DIR/${CFG_NAME}.cfg"
+fi
 
 RUN_NAME=$(grep '^runName=' "$CONFIG" | cut -d'=' -f2)
 SEED=$(grep '^seed=' "$CONFIG" | cut -d'=' -f2)
@@ -26,10 +43,7 @@ USE_DIVE=$(grep '^useDive=' "$CONFIG" | cut -d'=' -f2)
 PRESOLVE=$(grep '^presolve=' "$CONFIG" | cut -d'=' -f2)
 VERBOSE=$(grep '^verbose=' "$CONFIG" | cut -d'=' -f2)
 
-FOLDER="${2:-fpfw_baseline}"
-
-OUT_DIR="$COMP_RESULT/$FOLDER/output"
-RES_DIR="$COMP_RESULT/$FOLDER/result"
+RES_DIR="$RESULT_DIR/result"
 rm -rf "$RES_DIR"
 mkdir -p "$RES_DIR"
 
@@ -99,47 +113,55 @@ declare -a found_fp_iters=()
 declare -a found_restarts=()
 declare -a found_perturbations=()
 
-for output_file in "$OUT_DIR"/*.out; do
+for instance_dir in "$RESULT_DIR"/*/; do
+    instance_dir="${instance_dir%/}"
+    instance_name=$(basename "$instance_dir")
+    [ "$instance_name" = "result" ] && continue
+
+    output_file="$instance_dir/slurm_job.out"
+    results_json="$instance_dir/results.json"
     if [ ! -f "$output_file" ]; then continue; fi
 
     total_count=$((total_count + 1))
-    instance_name=$(basename "$output_file" .out)
 
     binary_vars=$(grep "binaryVars =" "$output_file" | tail -1 | awk '{print $3}')
     integer_vars=$(grep "integerVars =" "$output_file" | tail -1 | awk '{print $3}')
     continuous_vars=$(grep "continuousVars =" "$output_file" | tail -1 | awk '{print $3}')
-    total_time=$(grep "^totalTime =" "$output_file" | tail -1 | awk '{print $3}' | tr -d 's')
-    heur_time=$(grep -E "^(totalHeurTime|heurTime) =" "$output_file" | tail -1 | awk '{print $3}' | tr -d 's')
-    fw_time=$(grep "fwTime =" "$output_file" | tail -1 | awk '{print $3}' | tr -d 's')
-    fp_iterations=$(grep "pumpIterations =" "$output_file" | tail -1 | awk '{print $3}')
-    fw_iterations=$(grep "fwIterations =" "$output_file" | tail -1 | awk '{print $3}')
-    restarts=$(grep "restartCount =" "$output_file" | tail -1 | awk '{print $3}')
-    perturbations=$(grep "perturbCount =" "$output_file" | tail -1 | awk '{print $3}')
-    solution_found=$(grep "solFound =" "$output_file" | tail -1 | awk '{print $3}')
-    if [ -z "$solution_found" ]; then solution_found="false"; fi
 
-    exit_reason_str=$(grep "exitReason =" "$output_file" | tail -1 | sed 's/exitReason = //')
-
-    case "$exit_reason_str" in
-        *"SCIP node limit reached before heuristic"*)   exit_reason_code="SCIP_NODE_LIMIT" ;;
-        *"time limit reached before heuristic"*)        exit_reason_code="SCIP_TIME_LIMIT" ;;
-        *"time limit reached"*)                         exit_reason_code="TIME_LIMIT" ;;
-        *"iteration limit reached"*)                    exit_reason_code="ITER_LIMIT" ;;
-        *"outside the feasible polytope"*)              exit_reason_code="INFEASIBLE_FW" ;;
-        *"found by direct rounding"*)                   exit_reason_code="SOLUTION_ROUND" ;;
-        *"found by dive"*)                               exit_reason_code="SOLUTION_DIVE" ;;
-        *"found by FW projection"*)                     exit_reason_code="SOLUTION_FWPROJ" ;;
-        *"found by randomized rounding"*)               exit_reason_code="SOLUTION_RR" ;;
-        *"solved to optimality by SCIP"*)               exit_reason_code="SCIP_OPTIMAL" ;;
-        *"LP is infeasible"*)                           exit_reason_code="SCIP_INFEASIBLE" ;;
-        *"LP is unbounded"*)                            exit_reason_code="SCIP_UNBOUNDED" ;;
-        *)                                                exit_reason_code="UNKNOWN" ;;
-    esac
-
-    if [ "$solution_found" = "true" ]; then
-        objective=$(grep "primalBound =" "$output_file" | tail -1 | awk '{print $3}')
-        gap=$(grep "^gap =" "$output_file" | tail -1 | awk '{print $3}')
+    if [ -f "$results_json" ]; then
+        exit_reason_code=$(jq -r '.exitReason' "$results_json")
+        solution_found=$(jq -r '.solutionFound' "$results_json")
+        total_time=$(printf '%.2f' "$(jq -r '.totalTime' "$results_json")")
+        heur_time=$(printf '%.2f' "$(jq -r '.heurTime' "$results_json")")
+        fw_time=$(printf '%.2f' "$(jq -r '.fwTime' "$results_json")")
+        fp_iterations=$(jq -r '.pumpIterations' "$results_json")
+        fw_iterations=$(jq -r '.fwIterations' "$results_json")
+        restarts=$(jq -r '.restartCount' "$results_json")
+        perturbations=$(jq -r '.perturbCount' "$results_json")
+        objective=$(jq -r '.primalBound' "$results_json")
+        gap_frac=$(jq -r '.gap' "$results_json")
+        gap=$(awk -v g="$gap_frac" 'BEGIN { printf "%.2f", g * 100 }')
+        # heurTime/fwTime/etc. are meaningless when SCIP finished before the
+        # heuristic ever ran; blank them out so they render as N/A below.
+        case "$exit_reason_code" in
+            SCIP_*) heur_time="" ;;
+        esac
     else
+        # No results.json means the run crashed before writing it.
+        exit_reason_code="UNKNOWN"
+        solution_found="false"
+        total_time=""
+        heur_time=""
+        fw_time=""
+        fp_iterations=""
+        fw_iterations=""
+        restarts=""
+        perturbations=""
+        objective="N/A"
+        gap="N/A"
+    fi
+
+    if [ "$solution_found" != "true" ]; then
         objective="N/A"
         gap="N/A"
     fi

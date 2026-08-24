@@ -1,4 +1,4 @@
-function runInstance(fileName::String, config::FPFWConfig)
+function runInstance(fileName::String, config::FPFWConfig, resultsDir::String="")
     printstyled("Timestamp: ", Dates.format(Dates.now(), "yyyy-mm-dd HH:MM:SS"), "\n", color=:cyan)
 
     globalStartTime = time()
@@ -27,6 +27,10 @@ function runInstance(fileName::String, config::FPFWConfig)
 
     stats = buildStats(scip, heur, totalTime)
     printResults(stats)
+
+    if !isempty(resultsDir)
+        writeResults(stats, config, fileName, resultsDir)
+    end
 
     return nothing
 end

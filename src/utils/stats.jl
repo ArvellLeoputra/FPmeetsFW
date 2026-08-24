@@ -146,3 +146,31 @@ function printResults(stats::FPFWStats)
 
     println("exitReason = $exitMsg")
 end
+
+function writeResults(stats::FPFWStats, config::FPFWConfig, fileName::String, resultsDir::String)
+    mkpath(resultsDir)
+
+    result = Dict(
+        "instance" => basename(fileName),
+        "runName" => config.runName,
+        "primalBound" => stats.primalBound,
+        "dualBound" => stats.dualBound,
+        "gap" => stats.gap,
+        "primalIntegral" => stats.primalIntegral,
+        "solutionFound" => stats.solutionFound,
+        "totalTime" => stats.totalTime,
+        "rootTime" => stats.rootTime,
+        "heurTime" => stats.heurTime,
+        "fwTime" => stats.fwTime,
+        "randRoundTime" => stats.rrTime,
+        "pumpIterations" => stats.pumpIterations,
+        "fwIterations" => stats.fwIterations,
+        "perturbCount" => stats.perturbCount,
+        "restartCount" => stats.restartCount,
+        "exitReason" => string(stats.exitReason),
+    )
+
+    open(joinpath(resultsDir, "results.json"), "w") do io
+        JSON.print(io, result, 2)
+    end
+end

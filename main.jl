@@ -1,5 +1,5 @@
 include("src/FPmeetsFW.jl")
 using .FPmeetsFW
 
-fileName, config = loadConfig(ARGS)
-runInstance(fileName, config)
+fileName, config, resultsDir = loadConfig(ARGS)
+runInstance(fileName, config, resultsDir)

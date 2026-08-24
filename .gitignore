@@ -12,7 +12,3 @@ misc/
 
 # Julia
 Manifest.toml
-
-# Local experiment configs (keep only the tracked baseline)
-settings/*
-!settings/fpfw.cfg
