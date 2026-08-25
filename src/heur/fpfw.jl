@@ -391,10 +391,23 @@ function SCIP.find_primal_solution(
         remainingTime = heurTimeLimit - timeElapsed(heurStartTime)
         fwStartTime = time()
 
-        xProj, projObj, fwIters, activeSet = fwProject(
-            config, f, grad!, data.lmo, xFrac, xRound, activeGIntIdx, activeIntIdx,
-            activeSet, prevGrad, ncols, remainingTime
-        )
+        # Bound the LMO's own LP solves to what's left of the budget, so a single slow LP can't run unbounded
+        data.lmo.deadline[] = time() + remainingTime
+
+        # Pre-declared: a `try` block inside a `while` loop is its own scope in Julia, so
+        # first-assigning these inside the try below would not be visible after it.
+        local xProj, projObj, fwIters
+        try
+            xProj, projObj, fwIters, activeSet = fwProject(
+                config, f, grad!, data.lmo, xFrac, xRound, activeGIntIdx, activeIntIdx,
+                activeSet, prevGrad, ncols, remainingTime
+            )
+        catch e
+            e isa LMODeadlineExceeded || rethrow()
+            stats.fwTime += timeElapsed(fwStartTime)
+            stats.exitReason = TIME_LIMIT
+            break
+        end
 
         # Update FW stats
         stats.fwTime += timeElapsed(fwStartTime)

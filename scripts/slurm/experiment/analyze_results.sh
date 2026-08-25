@@ -43,7 +43,7 @@ USE_DIVE=$(grep '^useDive=' "$CONFIG" | cut -d'=' -f2)
 PRESOLVE=$(grep '^presolve=' "$CONFIG" | cut -d'=' -f2)
 VERBOSE=$(grep '^verbose=' "$CONFIG" | cut -d'=' -f2)
 
-RES_DIR="$RESULT_DIR/result"
+RES_DIR="$COMP_RESULT/config_comparison/$FOLDER"
 rm -rf "$RES_DIR"
 mkdir -p "$RES_DIR"
 
@@ -131,9 +131,9 @@ for instance_dir in "$RESULT_DIR"/*/; do
     if [ -f "$results_json" ]; then
         exit_reason_code=$(jq -r '.exitReason' "$results_json")
         solution_found=$(jq -r '.solutionFound' "$results_json")
-        total_time=$(printf '%.2f' "$(jq -r '.totalTime' "$results_json")")
-        heur_time=$(printf '%.2f' "$(jq -r '.heurTime' "$results_json")")
-        fw_time=$(printf '%.2f' "$(jq -r '.fwTime' "$results_json")")
+        total_time=$(awk -v t="$(jq -r '.totalTime' "$results_json")" 'BEGIN { printf "%.2f", t }')
+        heur_time=$(awk -v t="$(jq -r '.heurTime' "$results_json")" 'BEGIN { printf "%.2f", t }')
+        fw_time=$(awk -v t="$(jq -r '.fwTime' "$results_json")" 'BEGIN { printf "%.2f", t }')
         fp_iterations=$(jq -r '.pumpIterations' "$results_json")
         fw_iterations=$(jq -r '.fwIterations' "$results_json")
         restarts=$(jq -r '.restartCount' "$results_json")

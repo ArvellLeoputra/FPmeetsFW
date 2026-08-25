@@ -167,7 +167,7 @@ function buildLPILMO(
             stage, nlmoCols, ncols, nGInt, nlmoRows, nrows, 2 * nGInt)
     end
 
-    return LPILMO(lpi, nlmoCols, nlmoRows, nrows, verbose)
+    return LPILMO(lpi, nlmoCols, nlmoRows, nrows, verbose, Ref(Inf))
 end
 
 # Update the rounding values in the LMO's LPI
@@ -243,8 +243,18 @@ function FrankWolfe.compute_extreme_point(lmo::LPILMO, direction::AbstractVector
     rstatBefore = zeros(Cint, nrowsRef[])
     SCIP.SCIPlpiGetBase(lmo.lpi, cstatBefore, rstatBefore)
 
+    # Cap this single solve to whatever's left of the heuristic's own time budget, so one slow LP solve can't run 
+    # unbounded and get the whole process killed by an external wall-clock limit instead of exiting cleanly
+    lpTimeLeft = min(DEF_SCIP_TIME_LIMIT, max(0.0, lmo.deadline[] - time()))
+    SCIP.@SCIP_CALL SCIP.SCIPlpiSetRealpar(lmo.lpi, SCIP.SCIP_LPPAR_LPTILIM, lpTimeLeft)  # SCIP_LPPAR_LPTILIM: LP time limit (> 0)
+
     # Solve with dual simplex
     SCIP.@SCIP_CALL SCIP.SCIPlpiSolveDual(lmo.lpi)
+
+    # Check if time limit was reached
+    if SCIP.SCIPlpiIsTimelimExc(lmo.lpi) == SCIP.TRUE
+        throw(LMODeadlineExceeded())
+    end
 
     simplexIter = Ref{Cint}(0)
     SCIP.@SCIP_CALL SCIP.SCIPlpiGetIterations(lmo.lpi, simplexIter)

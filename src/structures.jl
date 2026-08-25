@@ -106,7 +106,16 @@ struct LPILMO <: FrankWolfe.LinearMinimizationOracle
     nrows::Int32      # total rows (original LP rows + manhattan aux rows, if any)
     origNrows::Int32  # original LP row count, before the manhattan aux block
     verbose::Int
+    deadline::Base.RefValue{Float64}  # time() value by which the current LP solve must give up; Inf = no limit
 end
+
+"""
+LMODeadlineExceeded
+Thrown by `compute_extreme_point` when a single LP solve is cut off by `LPILMO.deadline`
+before finishing, so the caller can treat it as a clean time-limit exit instead of the
+solve failing to reach primal feasibility.
+"""
+struct LMODeadlineExceeded <: Exception end
 
 """
 FPFWRunData

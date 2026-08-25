@@ -19,7 +19,7 @@ fi
 # Positional args
 CFG_NAME="$1"
 FOLDER="$2"
-TIME_LIMIT="${3:-30:00}"
+TIME_LIMIT="${3:-1:00:00}"
 
 # Machine-specific paths, overridable via env (e.g. PROJECT_DIR=... ./submit_experiment.sh ...)
 PROJECT_DIR="${PROJECT_DIR:-/home/htc/aleoputra/project}"
