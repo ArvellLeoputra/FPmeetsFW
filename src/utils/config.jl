@@ -58,8 +58,8 @@ function buildFPFWConfig(params::Dict{String, String})
     seed = parse(Int, params["seed"])
     verbose = parse(Int, params["verbose"])
 
-    if verbose < 0 || verbose > 3
-        error("Invalid verbose: $verbose. Must be 0, 1, 2, or 3")
+    if verbose < 0 || verbose > 4
+        error("Invalid verbose: $verbose. Must be 0, 1, 2, 3, or 4")
     end
 
     if norm ∉ VALID_NORMS

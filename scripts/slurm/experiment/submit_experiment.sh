@@ -4,15 +4,25 @@
 # settings/<cfgName>.cfg, into compResult/<folderName>/<instance>/{slurm_job.out,slurm_job.err,results.json}
 #
 # Usage:
-#   ./submit_experiment.sh <cfgName> <folderName> [timeLimit]
+#   ./submit_experiment.sh <cfgName> <folderName> [slurmWalltime] [seed]
+#
+#   slurmWalltime  value for "#SBATCH --time" (default 1:00:00); NOT the heuristic
+#                  time limit, which stays in the .cfg (timeLimit=...).
+#   seed           optional; when given, the archived config's "seed=" line is
+#                  overridden with this value and the result folder is suffixed
+#                  "_s<seed>" so multiple seeds of the same config live side by
+#                  side (compResult/<folderName>_s<seed>/). Also settable via the
+#                  SEED env var.
 #
 # Example (replaces the old submit_fpfw.sh):
 #   ./submit_experiment.sh fpfw fpfw_baseline
 # Example (replaces the old submit_run3.sh):
 #   ./submit_experiment.sh run3 fpfw_run3
+# Example (5 seeds of run4 -> fpfw_run4_s1 .. fpfw_run4_s5):
+#   for s in 1 2 3 4 5; do ./submit_experiment.sh run4 fpfw_run4 1:00:00 "$s"; done
 
 if [ $# -lt 2 ]; then
-    echo "Usage: ./submit_experiment.sh <cfgName> <folderName> [timeLimit]" >&2
+    echo "Usage: ./submit_experiment.sh <cfgName> <folderName> [slurmWalltime] [seed]" >&2
     exit 1
 fi
 
@@ -20,6 +30,16 @@ fi
 CFG_NAME="$1"
 FOLDER="$2"
 TIME_LIMIT="${3:-1:00:00}"
+SEED="${4:-${SEED:-}}"
+
+# When a seed is requested, give this run its own result tree so seeds don't
+# overwrite each other. analyze_configs.sh globs "<folderName>_s*" to aggregate.
+if [ -n "$SEED" ]; then
+    case "$SEED" in
+        ''|*[!0-9-]*) echo "Error: seed must be an integer, got: $SEED" >&2; exit 1 ;;
+    esac
+    FOLDER="${FOLDER}_s${SEED}"
+fi
 
 # Machine-specific paths, overridable via env (e.g. PROJECT_DIR=... ./submit_experiment.sh ...)
 PROJECT_DIR="${PROJECT_DIR:-/home/htc/aleoputra/project}"
@@ -52,6 +72,17 @@ mkdir -p "$RESULT_DIR"
 RUN_CONFIG="$RESULT_DIR/config.cfg"
 cp "$CONFIG" "$RUN_CONFIG"
 
+# Override the seed in the archived config (not the source settings file) so
+# every seed of a config is reproducible from its own compResult folder.
+if [ -n "$SEED" ]; then
+    if grep -q '^seed=' "$RUN_CONFIG"; then
+        sed -i "s/^seed=.*/seed=$SEED/" "$RUN_CONFIG"
+    else
+        echo "seed=$SEED" >> "$RUN_CONFIG"
+    fi
+    echo "Seed override: seed=$SEED (folder $FOLDER)"
+fi
+
 # Write each instance's id/path once, so task IDs stay stable even if INSTANCE_DIR changes later
 EXPERIMENT_LIST="$RESULT_DIR/experiment_list.tsv"
 : > "$EXPERIMENT_LIST"
@@ -78,4 +109,4 @@ envsubst '$FOLDER,$TIME_LIMIT,$NUM_INSTANCES,$EXPERIMENT_LIST,$RESULT_DIR,$RUN_C
 # Submit the saved job script
 sbatch "$JOB_SCRIPT" || { echo "ERROR: sbatch failed for $FOLDER"; exit 1; }
 
-echo "Submitted: $FOLDER (${NUM_INSTANCES} instances, cfg=${CFG_NAME}, time=${TIME_LIMIT})"
+echo "Submitted: $FOLDER (${NUM_INSTANCES} instances, cfg=${CFG_NAME}${SEED:+, seed=${SEED}}, walltime=${TIME_LIMIT})"

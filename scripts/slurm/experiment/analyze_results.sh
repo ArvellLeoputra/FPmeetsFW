@@ -132,6 +132,7 @@ for instance_dir in "$RESULT_DIR"/*/; do
         exit_reason_code=$(jq -r '.exitReason' "$results_json")
         solution_found=$(jq -r '.solutionFound' "$results_json")
         total_time=$(awk -v t="$(jq -r '.totalTime' "$results_json")" 'BEGIN { printf "%.2f", t }')
+        root_time=$(awk -v t="$(jq -r '.rootTime' "$results_json")" 'BEGIN { printf "%.2f", t }')
         heur_time=$(awk -v t="$(jq -r '.heurTime' "$results_json")" 'BEGIN { printf "%.2f", t }')
         fw_time=$(awk -v t="$(jq -r '.fwTime' "$results_json")" 'BEGIN { printf "%.2f", t }')
         fp_iterations=$(jq -r '.pumpIterations' "$results_json")
@@ -151,6 +152,7 @@ for instance_dir in "$RESULT_DIR"/*/; do
         exit_reason_code="UNKNOWN"
         solution_found="false"
         total_time=""
+        root_time=""
         heur_time=""
         fw_time=""
         fp_iterations=""
@@ -232,6 +234,7 @@ for instance_dir in "$RESULT_DIR"/*/; do
     printf "  %-18s%s\n" "Continuous Vars:" "${continuous_vars}" >> "$DETAILED"
     printf "  %-18s%s\n" "Solution found:" "${solution_found}" >> "$DETAILED"
     printf "  %-18s%s\n" "Total time:" "${total_time}s" >> "$DETAILED"
+    printf "  %-18s%s\n" "Root time:" "${root_time:-N/A}s" >> "$DETAILED"
     printf "  %-18s%s\n" "Heur time:" "${heur_time:-N/A}s" >> "$DETAILED"
     printf "  %-18s%s\n" "FP iterations:" "${fp_iterations}" >> "$DETAILED"
     printf "  %-18s%s\n" "FW iterations:" "${fw_iterations}" >> "$DETAILED"

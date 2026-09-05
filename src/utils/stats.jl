@@ -76,6 +76,7 @@ function printRunInfo(scip::SCIP.SCIPData, config::FPFWConfig)
     println("binaryVars = $binCount")
     println("integerVars = $intCount")
     println("continuousVars = $contCount")
+    println("readTime = $(round(SCIP.SCIPgetReadingTime(scip); digits=2))s")
 end
 
 function printConfigs(config::FPFWConfig)

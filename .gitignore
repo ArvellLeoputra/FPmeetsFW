@@ -12,3 +12,6 @@ misc/
 
 # Julia
 Manifest.toml
+
+# Sysimage build artifact
+fpfw_sysimage.so

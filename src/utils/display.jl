@@ -56,10 +56,29 @@ function printRow!(display::PumpDisplay, values...)
     println()
 end
 
-function printInitialSolveInfo(initObj, intIdx, scipTime, lpRootIter, nFracVars)
+function printInitialSolveInfo(scip, initObj, intIdx)
+    # deg measures how degenerate the face is (fraction of non-basic vars with zero reduced cost);
+    # high degeneracy => the projection LMO can jump vertices between pump iterations.
+    # varconsratio estimates the face's dimension
+    deg = Ref{Cdouble}(0.0)
+    varconsratio = Ref{Cdouble}(0.0)
+    SCIP.@SCIP_CALL SCIP.SCIPgetLPDualDegeneracy(scip, deg, varconsratio)
+
     printstyled("[initialSolve]\n", color=:cyan)
-    @printf("Initial LP: lpiter=%d origObj=%.2f frac=%d/%d time=%.2fs\n",
-        lpRootIter, initObj, nFracVars, length(intIdx), scipTime)
+    @printf("presolve = %d->%d vars, %d->%d conss, %d rounds, %.2fs\n",
+        SCIP.SCIPgetNOrigVars(scip), SCIP.SCIPgetNVars(scip),
+        SCIP.SCIPgetNOrigConss(scip), SCIP.SCIPgetNConss(scip),
+        SCIP.SCIPgetNPresolRounds(scip), SCIP.SCIPgetPresolvingTime(scip))
+    @printf("rootLP = %dx%d, origObj %.6f, %d iters, %.2fs\n",
+        SCIP.SCIPgetNLPCols(scip), SCIP.SCIPgetNLPRows(scip),
+        initObj, SCIP.SCIPgetNLPIterations(scip), SCIP.SCIPgetFirstLPTime(scip))
+    @printf("lpSolves = %d (primal %d, dual %d, resolve %d)\n",
+        SCIP.SCIPgetNLPs(scip), SCIP.SCIPgetNPrimalLPs(scip),
+        SCIP.SCIPgetNDualLPs(scip), SCIP.SCIPgetNResolveLPs(scip))
+    @printf("fracVars = %d / %d\n", SCIP.SCIPgetNLPBranchCands(scip), length(intIdx))
+    @printf("separation = %d rounds, %d cuts\n",
+        SCIP.SCIPgetNSepaRounds(scip), SCIP.SCIPgetNCutsApplied(scip))
+    @printf("degeneracy = %.4f, var/cons %.4f\n", deg[], varconsratio[])
 end
 
 function printInitialBasisInfo(cstat, rstat)

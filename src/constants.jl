@@ -12,7 +12,7 @@ const DEF_GRAD_FLIP_TOL = 1e-3
 const DEF_SCIP_TIME_LIMIT = 1000000
 
 # Perturbation and restart parameters
-const DEF_MAX_STAGNATION = 5       # Maximum number of iterations without a real (>= threshold) improvement before perturbing
+const DEF_MAX_STAGNATION = 5       # Iterations without a real (>= threshold) projObj improvement before perturbing
 const DEF_MIN_IMPROVEMENT = 0.10   # Relative improvement in projObj required to reset the stagnation counter
 const DEF_MAX_PERTURBS = 10        # Cumulative perturbs in current stage before escalating to a restart
 const DEF_BIGM = 1e9               # Big M constant for cycle-breaking perturbations

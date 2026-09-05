@@ -133,9 +133,7 @@ function SCIP.find_primal_solution(
     # Log initial LP solve info
     if config.verbose >= 1
         initObj = origObjective(scip, lpCols, initSol, ncols)
-        lpRootIter = SCIP.SCIPgetNLPIterations(scip)
-        nFracVars = SCIP.SCIPgetNLPBranchCands(scip)
-        printInitialSolveInfo(initObj, intIdx, rootTime, lpRootIter, nFracVars)
+        printInitialSolveInfo(scip, initObj, intIdx)
     end
 
     # Log initial basis info
@@ -288,24 +286,47 @@ function SCIP.find_primal_solution(
             println("  xRound: $nUp up, $nDown down, $nChanged changed / $(length(fracIdx)) fractional")
         end
 
-        # Cycle detection
+        # Cycle / stagnation detection
         if config.fwStepSize == :unitary
             h = hashRounded(xRound, activeIntIdx)
-            if h == prevHash
-                flips = perturb(scip, xRound, xFrac, binIdx, activeIntIdx, avgFlips, config.verbose >= 2)
-                perturbed = flips > 0
-                if perturbed
-                    stats.perturbCount += 1
-                    h = hashRounded(xRound, activeIntIdx)  # rehash after perturbation
+
+            # stucked: the rounded solution is identical to the previous iteration's
+            # cycled: the rounded solution has been seen before (but not in the previous iteration)
+            stucked = h == prevHash
+            cycled = !stucked && h in visitedRounded
+            stagnated = stagnationCount >= DEF_MAX_STAGNATION
+
+            if stucked || cycled || stagnated
+                # Restart (rather than perturb) on a genuine longer cycle or if the perturbation limit has been reached
+                doRestart = cycled || currentPerturbCount >= DEF_MAX_PERTURBS
+
+                if !doRestart
+                    flips = perturb(scip, xRound, xFrac, binIdx, activeIntIdx, avgFlips, config.verbose >= 2)
+                    perturbed = flips > 0
+                    if perturbed
+                        stats.perturbCount += 1
+                        currentPerturbCount += 1
+                        stagnationCount = 0
+                        bestProjObj = Inf
+                        h = hashRounded(xRound, activeIntIdx)  # rehash after perturbation
+                    else
+                        # edge case: perturbation failed to flip any variables, so escalate to a restart
+                        # happens only when the LP solution is already integral but rejected by SCIP
+                        doRestart = true
+                    end
                 end
 
-            elseif h in visitedRounded
-                flips = restart(scip, xRound, xFrac, prevRound, binIdx, activeGIntIdx, lpCols, avgFlips, config.verbose >= 2)
-                restarted = flips > 0
-                if restarted
-                    stats.restartCount += 1
-                    h = hashRounded(xRound, activeIntIdx)  # rehash after restart
-                    empty!(visitedRounded)  # clear the visited set after a restart
+                if doRestart
+                    flips = restart(scip, xRound, xFrac, prevRound, binIdx, activeGIntIdx, lpCols, avgFlips, config.verbose >= 2)
+                    restarted = flips > 0
+                    if restarted
+                        stats.restartCount += 1
+                        currentPerturbCount = 0
+                        stagnationCount = 0
+                        bestProjObj = Inf
+                        h = hashRounded(xRound, activeIntIdx)  # rehash after restart
+                        empty!(visitedRounded)  # clear the visited set after a restart
+                    end
                 end
             end
 
@@ -431,16 +452,14 @@ function SCIP.find_primal_solution(
             break
         end
 
-        # Stagnation tracking (only for non-unitary projections)
-        if config.fwStepSize != :unitary
-            if SCIP.SCIPisLT(scip, projObj, bestProjObj) == SCIP.TRUE
-                if projObj / bestProjObj < 1 - DEF_MIN_IMPROVEMENT
-                    stagnationCount = 0
-                end
-                bestProjObj = projObj
-            else
-                stagnationCount += 1
+        # Stagnation tracking
+        if SCIP.SCIPisLT(scip, projObj, bestProjObj) == SCIP.TRUE
+            if projObj / bestProjObj < 1 - DEF_MIN_IMPROVEMENT
+                stagnationCount = 0
             end
+            bestProjObj = projObj
+        else
+            stagnationCount += 1
         end
 
         # Step 3: Check feasibility and integrality
