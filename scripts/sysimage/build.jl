@@ -9,6 +9,7 @@
 #
 # Run the pump with it:
 #   julia --sysimage <output_path> --project=<FPmeetsFW> main.jl <instance> <cfg> ...
+#     (trailing "..." are optional key=value overrides, e.g. resultsDir=/path timeLimit=60)
 #   submit_sweep.sh -S <output_path> ...    # wires --sysimage into the array job
 #
 # Rebuild whenever src/, settings/, Project.toml or a dependency changes.

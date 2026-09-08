@@ -1,35 +1,105 @@
 # Build (or rebuild) the LMO from the current LP and seed its basis
 # Used both for the initial build and for the stage-1 -> stage-2 rebuild (freeOld frees the old LPI first)
-function setupLMO!(scip, data, config, lpCols, lpRows, colDict, gIntIdx, stage, ncols, nrows; freeOld::Bool=false)
+function setupLMO!(
+    scip::Ptr{SCIP.SCIP_},
+    data::FPFWRunData,
+    config::FPFWConfig,
+    lp::LPInfo,
+    activeGIntIdx::Vector{Int},
+    stage::Int;
+    freeOld::Bool = false
+)
     if config.lmoWarmStart
         if freeOld
             oldLpiRef = Ref(data.lmo.lpi)
             SCIP.@SCIP_CALL SCIP.SCIPlpiFree(oldLpiRef)
         end
-        data.lmo = buildLPILMO(scip, lpCols, lpRows, colDict, gIntIdx, config.norm, stage, ncols, nrows, config.verbose)
 
+        data.lmo = buildLPILMO(scip, lp.lpCols, lp.lpRows, lp.colDict, activeGIntIdx, config.norm, stage, lp.ncols, lp.nrows, config.verbose)
         newLpiRef = Ref{Ptr{SCIP.SCIP_LPI}}(C_NULL)
         SCIP.@SCIP_CALL SCIP.SCIPgetLPI(scip, newLpiRef)
+
         if SCIP.SCIPlpiIsOptimal(newLpiRef[]) == SCIP.TRUE
-            LPIinitBase(scip, data.lmo, ncols, nrows)
+            LPIinitBase(scip, data.lmo, lp.ncols, lp.nrows)
         end
     else
-        data.lmo, data.auxConstraintRefs = SCIPbuildLMO(scip, lpCols, lpRows, colDict, gIntIdx, config.norm, ncols, nrows)
+        data.lmo, data.auxConstraintRefs = SCIPbuildLMO(scip, lp.lpCols, lp.lpRows, lp.colDict, activeGIntIdx, config.norm, lp.ncols, lp.nrows)
     end
+end
+
+# Check if stage 1 is complete
+#  1. All binaries are integral in xFrac, or
+#  2. Stage 1 hit its iteration cap, or
+#  3. Stage 1 stalled (DEF_STAGE1_NOIMPR_LIMIT iterations with no real bestProjObj gain)
+function stage1Complete(
+    st::StageState,
+    scip::Ptr{SCIP.SCIP_},
+    lp::LPInfo,
+    xFrac::Vector{Float64}
+)::Bool
+    return countFracVars(scip, lp.binIdx, xFrac) == 0 ||
+           st.stageIter > DEF_STAGE1_MAX_ITER ||
+           st.stage1NoImpr > DEF_STAGE1_NOIMPR_LIMIT
+end
+
+# Advance `st` from stage 1 (binaries only) to stage 2 (all integers): widen the active sets,
+# rebuild the LMO and FW functions, reset the per-stage counters and cycle cache, and resume
+# xFrac/prevProj from the closest point stage 1 reached.
+# Returns (activeSet, f, grad!, dist) for the caller to rebind — activeSet is a fresh (nothing)
+# FW warm start for the new stage.
+function transitionToStage2!(
+    st::StageState,
+    scip::Ptr{SCIP.SCIP_},
+    config::FPFWConfig,
+    data::FPFWRunData,
+    lp::LPInfo,
+    xRound::Vector{Float64},
+    xFrac::Vector{Float64},
+    prevProj::Vector{Float64},
+    visitedRounded::Set{UInt}
+)
+    st.stage = 2
+    st.stageIter = 0
+    st.activeGIntIdx = lp.gIntIdx
+    st.activeIntIdx = lp.intIdx
+    st.avgFlips = max(1, ceil(Int, 0.1 * length(lp.intIdx)))
+
+    setupLMO!(scip, data, config, lp, st.activeGIntIdx, st.stage; freeOld=true)
+    f, grad!, dist = buildFWFunctions(config.norm, lp.binIdx, st.activeGIntIdx, st.activeIntIdx, xRound)
+
+    empty!(visitedRounded)
+    st.prevHash = UInt(0)
+    st.bestProjObj = Inf
+    st.stagnationCount = 0
+    st.consecutivePerturbs = 0
+
+    # Resume stage 2 from the closest point stage 1 found
+    xFrac .= st.closestFrac
+    prevProj .= st.closestFrac
+    st.closestDist = Inf
+
+    return nothing, f, grad!, dist
 end
 
 # Randomized feasibility probe: probabilistically round the current LP point xFrac several times and
 # submit each to SCIP. Returns true as soon as one is accepted, leaving the MIP-feasible point in xProbe.
-function randFeasCheck!(scip, heur_ptr, lpCols, xFrac, xProbe, intIdx, ncols)
+# Called at both stages with all integer constrained variables considered.
+function randFeasCheck!(
+    scip::Ptr{SCIP.SCIP_},
+    heur_ptr::Ptr{SCIP.SCIP_HEUR},
+    lp::LPInfo,
+    xFrac::Vector{Float64},
+    xProbe::Vector{Float64}
+)::Bool
     for _ in 1:DEF_RAND_FEAS_ITER_LIMIT
         xProbe .= xFrac
-        for i in intIdx
+        for i in lp.intIdx
             # Round up with probability xFrac[i] - floor(xFrac[i]), otherwise round down
             frac = xFrac[i] - floor(xFrac[i])
             xProbe[i] = rand() < frac ? ceil(xFrac[i]) : floor(xFrac[i])
         end
 
-        if submitSolution(scip, heur_ptr, lpCols, xProbe, ncols)
+        if submitSolution(scip, heur_ptr, lp.lpCols, xProbe, lp.ncols)
             return true
         end
     end
@@ -37,18 +107,31 @@ function randFeasCheck!(scip, heur_ptr, lpCols, xFrac, xProbe, intIdx, ncols)
 end
 
 # Projection using Frank-Wolfe
-function fwProject(config, f, grad!, lmo, xFrac, xRound, gIntIdx, intIdx, activeSet, prevGrad, ncols, remainingTime)
+function fwProject(
+    config::FPFWConfig,
+    f::Function,
+    grad!::Function,
+    lmo::FrankWolfe.LinearMinimizationOracle,
+    xFrac::Vector{Float64},
+    xRound::Vector{Float64},
+    activeGIntIdx::Vector{Int},
+    activeIntIdx::Vector{Int},
+    activeSet::Union{Nothing, FrankWolfe.ActiveSet},
+    prevGrad::Vector{Float64},
+    ncols::Int32,
+    remainingTime::Float64
+)
     # Rebuilt each call so stateful line searches (e.g. Adaptive) reset per FW solve
     ls = buildLineSearch(config.fwStepSize)
 
     if config.norm == :manhattan
         # Manhattan start: xFrac plus one aux per general integer, set to |xFrac - xRound| (a feasible start)
-        nGInt = length(gIntIdx)
+        nGInt = length(activeGIntIdx)
         xStart = zeros(Float64, ncols + nGInt)
         xStart[1:ncols] .= xFrac
 
         # Set feasible aux values to the distance from xFrac to xRound for each general integer
-        for (k, i) in enumerate(gIntIdx)
+        for (k, i) in enumerate(activeGIntIdx)
             xStart[ncols + k] = abs(xFrac[i] - xRound[i])
         end
 
@@ -61,7 +144,7 @@ function fwProject(config, f, grad!, lmo, xFrac, xRound, gIntIdx, intIdx, active
         gradFn = grad!  # default to the original grad! function
         if config.verbose >= 2
             prevGrad .= 0.0
-            gradFn = buildGradCheck(grad!, prevGrad, intIdx, xRound)  # wrap grad! to check for flips
+            gradFn = buildGradCheck(grad!, prevGrad, activeIntIdx, xRound)  # wrap grad! to check for flips
         end
     end
 
@@ -117,10 +200,8 @@ function SCIP.find_primal_solution(
     end
 
     # Get LP data
-    ncols = SCIP.SCIPgetNLPCols(scip)
-    nrows = SCIP.SCIPgetNLPRows(scip)
-    lpCols, lpRows, colDict, binIdx, gIntIdx, initSol = getLPData(scip, ncols, nrows)
-    intIdx = [binIdx; gIntIdx]
+    lp = getLPInfo(scip)
+    (; lpCols, lpRows, colDict, binIdx, gIntIdx, intIdx, ncols, nrows, initSol) = lp
 
     data.called += 1
 
@@ -142,27 +223,19 @@ function SCIP.find_primal_solution(
         printInitialBasisInfo(cstat, rstat)
     end
 
-    # Initialize the stage and active integer sets
-    # Stage 1: binaries only, Stage 2: all integers
+    # Per-stage state
     if countFracVars(scip, binIdx, initSol) > 0
-        stage = 1
-        activeGIntIdx = Int[]
-        activeIntIdx = binIdx
+        st = StageState(; stage=1, activeIntIdx=binIdx, activeGIntIdx=Int[], closestFrac=copy(initSol))
     else
-        stage = 2
-        activeGIntIdx = gIntIdx
-        activeIntIdx = intIdx
+        st = StageState(; stage=2, activeIntIdx=intIdx, activeGIntIdx=gIntIdx, closestFrac=copy(initSol))
     end
-
-    # Per-stage iteration counter (resets at each stage transition)
-    stageIter = 0
 
     if config.verbose >= 2
         printstyled("[debug info]\n", color=:yellow)
     end
 
     # Build LMO from current LP
-    setupLMO!(scip, data, config, lpCols, lpRows, colDict, activeGIntIdx, stage, ncols, nrows)
+    setupLMO!(scip, data, config, lp, st.activeGIntIdx, st.stage)
 
     # Solution vectors
     xFrac = copy(initSol)              # LP-feasible solution
@@ -174,17 +247,10 @@ function SCIP.find_primal_solution(
     # FW setup
     activeSet = nothing
     prevGrad = zeros(Float64, ncols)  # for detecting gradient flips in smooth norms (only used at verbose >= 2)
-    f, grad!, dist = buildFWFunctions(config.norm, binIdx, activeGIntIdx, activeIntIdx, xRound)
+    f, grad!, dist = buildFWFunctions(config.norm, binIdx, st.activeGIntIdx, st.activeIntIdx, xRound)
 
-    # Perturbation and restart parameters
-    avgFlips = max(1, ceil(Int, 0.1 * length(activeIntIdx)))
-    visitedRounded = Set{UInt}()  # for cycle detection (only used with unitary step size)
-    prevHash = UInt(0)            # for cycle of length 1 detection (only used with unitary step size)
-
-    # Stagnation detection
-    bestProjObj = Inf
-    stagnationCount = 0
-    currentPerturbCount = 0
+    # Cycle detection cache (only used with unitary step size)
+    visitedRounded = Set{UInt}()
 
     # TODO: store the best solution found across iterations, not just the first one
     # foundSolution = nothing
@@ -201,42 +267,15 @@ function SCIP.find_primal_solution(
         end
 
         # Check stage 2 iteration cap
-        if stage == 2 && stageIter > DEF_STAGE2_MAX_ITER
+        if st.stage == 2 && st.stageIter > DEF_STAGE2_MAX_ITER
             stats.exitReason = ITER_LIMIT
             break
         end
 
-        # Transition to stage 2 if:
-        # 1. The solution is binary feasible w.r.t. the binary variables,
-        # 2. Stage 1's iteration cap is reached,
-        # 3. Stage 1 has already spent DEF_STAGE1_STALL_LIMIT perturb+restart attempts without escaping
-        if stage == 1 && (
-            countFracVars(scip, binIdx, xFrac) == 0 ||
-            stageIter > DEF_STAGE1_MAX_ITER ||
-            stats.perturbCount + stats.restartCount >= DEF_STAGE1_STALL_LIMIT
-        )
-            # Transition to stage 2
-            stage = 2
-            stageIter = 0
-            activeGIntIdx = gIntIdx
-            activeIntIdx = intIdx
-
-            # Rebuild the LMO for stage 2 (includes general integers)
-            setupLMO!(scip, data, config, lpCols, lpRows, colDict, activeGIntIdx, stage, ncols, nrows; freeOld=true)
-
-            # Reset active set and rebuild the FW functions
-            activeSet = nothing
-            f, grad!, dist = buildFWFunctions(config.norm, binIdx, activeGIntIdx, activeIntIdx, xRound)
-
-            # Reset perturbation and restart parameters
-            avgFlips = max(1, ceil(Int, 0.1 * length(activeIntIdx)))
-            empty!(visitedRounded)
-            prevHash = UInt(0)
-
-            # Reset stagnation detection
-            bestProjObj = Inf
-            stagnationCount = 0
-            currentPerturbCount = 0
+        # Advance to stage 2 once stage 1 is done (binaries satisfied / iter cap / stalled)
+        if st.stage == 1 && stage1Complete(st, scip, lp, xFrac)
+            activeSet, f, grad!, dist = transitionToStage2!(st, scip, config, data, lp,
+                                                            xRound, xFrac, prevProj, visitedRounded)
         end
 
         # Check global iteration limit (should rarely be reached since stage 1 and stage 2 have their own caps)
@@ -246,7 +285,7 @@ function SCIP.find_primal_solution(
         end
 
         stats.pumpIterations += 1
-        stageIter += 1
+        st.stageIter += 1
         restarted = false
         perturbed = false
         flips = 0
@@ -260,7 +299,7 @@ function SCIP.find_primal_solution(
         # Random feasibility check (skip the first iteration to save time)
         if config.randFeasCheck && stats.pumpIterations > 1
             rrStartTime = time()
-            found = randFeasCheck!(scip, heur_ptr, lpCols, xFrac, xProbe, intIdx, ncols)
+            found = randFeasCheck!(scip, heur_ptr, lp, xFrac, xProbe)
             stats.rrTime += timeElapsed(rrStartTime)
 
             if found
@@ -268,18 +307,18 @@ function SCIP.find_primal_solution(
                 origObj = origObjective(scip, lpCols, xProbe, ncols)
                 step = dist(xProbe, prevProj)
 
-                logDirectAccept(config, pumpDisplay, stats, stage, origObj, step, heurStartTime, flips, perturbed, restarted, "randFeasCheck", "RandFeasCheck")
+                logDirectAccept(config, pumpDisplay, stats, st.stage, origObj, step, heurStartTime, flips, perturbed, restarted, "randFeasCheck", "RandFeasCheck")
 
                 break
             end
         end
 
         # Step 1: Round LP-feasible solution w.r.t. the current stage's active integer variables
-        roundSolution!(xRound, xFrac, activeIntIdx, config.randRound)
+        roundSolution!(xRound, xFrac, st.activeIntIdx, config.randRound)
 
         # Rounding debug info
         if config.verbose >= 2
-            fracIdx = [i for i in activeIntIdx if !isVarInteger(scip, xFrac[i])]
+            fracIdx = [i for i in st.activeIntIdx if !isVarInteger(scip, xFrac[i])]
             nUp = count(i -> xRound[i] > xFrac[i], fracIdx)
             nDown = length(fracIdx) - nUp
             nChanged = count(i -> SCIP.SCIPisEQ(scip, xRound[i], prevRound[i]) == SCIP.FALSE, fracIdx)
@@ -288,27 +327,27 @@ function SCIP.find_primal_solution(
 
         # Cycle / stagnation detection
         if config.fwStepSize == :unitary
-            h = hashRounded(xRound, activeIntIdx)
+            h = hashRounded(xRound, st.activeIntIdx)
 
             # stucked: the rounded solution is identical to the previous iteration's
             # cycled: the rounded solution has been seen before (but not in the previous iteration)
-            stucked = h == prevHash
+            stucked = h == st.prevHash
             cycled = !stucked && h in visitedRounded
-            stagnated = stagnationCount >= DEF_MAX_STAGNATION
+            stagnated = st.stagnationCount >= DEF_MAX_STAGNATION
 
             if stucked || cycled || stagnated
                 # Restart (rather than perturb) on a genuine longer cycle or if the perturbation limit has been reached
-                doRestart = cycled || currentPerturbCount >= DEF_MAX_PERTURBS
+                doRestart = cycled || st.consecutivePerturbs >= DEF_MAX_PERTURBS
 
                 if !doRestart
-                    flips = perturb(scip, xRound, xFrac, binIdx, activeIntIdx, avgFlips, config.verbose >= 2)
+                    flips = perturb(scip, xRound, xFrac, binIdx, st.activeIntIdx, st.avgFlips, config.verbose >= 2)
                     perturbed = flips > 0
                     if perturbed
                         stats.perturbCount += 1
-                        currentPerturbCount += 1
-                        stagnationCount = 0
-                        bestProjObj = Inf
-                        h = hashRounded(xRound, activeIntIdx)  # rehash after perturbation
+                        st.consecutivePerturbs += 1
+                        st.stagnationCount = 0
+                        st.bestProjObj = Inf
+                        h = hashRounded(xRound, st.activeIntIdx)  # rehash after perturbation
                     else
                         # edge case: perturbation failed to flip any variables, so escalate to a restart
                         # happens only when the LP solution is already integral but rejected by SCIP
@@ -317,47 +356,47 @@ function SCIP.find_primal_solution(
                 end
 
                 if doRestart
-                    flips = restart(scip, xRound, xFrac, prevRound, binIdx, activeGIntIdx, lpCols, avgFlips, config.verbose >= 2)
+                    flips = restart(scip, xRound, xFrac, prevRound, binIdx, st.activeGIntIdx, lpCols, st.avgFlips, config.verbose >= 2)
                     restarted = flips > 0
                     if restarted
                         stats.restartCount += 1
-                        currentPerturbCount = 0
-                        stagnationCount = 0
-                        bestProjObj = Inf
-                        h = hashRounded(xRound, activeIntIdx)  # rehash after restart
+                        st.consecutivePerturbs = 0
+                        st.stagnationCount = 0
+                        st.bestProjObj = Inf
+                        h = hashRounded(xRound, st.activeIntIdx)  # rehash after restart
                         empty!(visitedRounded)  # clear the visited set after a restart
                     end
                 end
             end
 
-            prevHash = h
+            st.prevHash = h
             prevRound .= xRound
             push!(visitedRounded, h)
         else
             # Non-unitary FW converges gradually, so exact-hash cycle detection would over-trigger
             # Use objective stagnation instead (no improvement for DEF_MAX_STAGNATION iterations)
-            if stagnationCount >= DEF_MAX_STAGNATION
-                # currentPerturbCount: total times perturb is called this stage
-                if currentPerturbCount < DEF_MAX_PERTURBS
-                    currentPerturbCount += 1
-                    flips = perturb(scip, xRound, xFrac, binIdx, activeIntIdx, avgFlips, config.verbose >= 2)
+            if st.stagnationCount >= DEF_MAX_STAGNATION
+                # consecutivePerturbs: perturbs since the last restart (or stage start)
+                if st.consecutivePerturbs < DEF_MAX_PERTURBS
+                    st.consecutivePerturbs += 1
+                    flips = perturb(scip, xRound, xFrac, binIdx, st.activeIntIdx, st.avgFlips, config.verbose >= 2)
                     perturbed = flips > 0
                     if perturbed
                         stats.perturbCount += 1
                         # Reset counters
-                        stagnationCount = 0
-                        bestProjObj = Inf
+                        st.stagnationCount = 0
+                        st.bestProjObj = Inf
                     end
 
-                else  # escalate to a restart once currentPerturbCount reaches DEF_MAX_PERTURBS
-                    flips = restart(scip, xRound, xFrac, prevRound, binIdx, activeGIntIdx, lpCols, avgFlips, config.verbose >= 2)
+                else  # escalate to a restart once consecutivePerturbs reaches DEF_MAX_PERTURBS
+                    flips = restart(scip, xRound, xFrac, prevRound, binIdx, st.activeGIntIdx, lpCols, st.avgFlips, config.verbose >= 2)
                     restarted = flips > 0
                     if restarted
                         stats.restartCount += 1
                         # Reset counters
-                        currentPerturbCount = 0
-                        stagnationCount = 0
-                        bestProjObj = Inf
+                        st.consecutivePerturbs = 0
+                        st.stagnationCount = 0
+                        st.bestProjObj = Inf
                     end
                 end
             end
@@ -367,18 +406,18 @@ function SCIP.find_primal_solution(
         # LMO's rounding-target constraints must reflect the final xRound (post perturb/restart)
         if config.norm == :manhattan
             if config.lmoWarmStart
-                LPIupdateRounding!(data.lmo, activeGIntIdx, xRound)
+                LPIupdateRounding!(data.lmo, st.activeGIntIdx, xRound)
             else
-                MOIupdateRounding!(data.lmo, data.auxConstraintRefs, activeGIntIdx, xRound)
+                MOIupdateRounding!(data.lmo, data.auxConstraintRefs, st.activeGIntIdx, xRound)
             end
         end
 
         if perturbed && config.verbose >= 4
-            println("  xRound = $(xRound[activeIntIdx])  (after perturb)")
+            println("  xRound = $(xRound[st.activeIntIdx])  (after perturb)")
         end
 
         if restarted && config.verbose >= 4
-            println("  xRound = $(xRound[activeIntIdx])  (after restart)")
+            println("  xRound = $(xRound[st.activeIntIdx])  (after restart)")
         end
 
         # Try to submit the rounded solution to SCIP
@@ -387,13 +426,13 @@ function SCIP.find_primal_solution(
             origObj = origObjective(scip, lpCols, xRound, ncols)
             step = dist(xRound, prevProj)
 
-            logDirectAccept(config, pumpDisplay, stats, stage, origObj, step, heurStartTime, flips, perturbed, restarted, "feasRound", "FeasRound")
+            logDirectAccept(config, pumpDisplay, stats, st.stage, origObj, step, heurStartTime, flips, perturbed, restarted, "feasRound", "FeasRound")
 
             break
         end
 
         # Skip diveSolve in stage 1 (only binaries are active, so diveSolve can't produce a complete MIP solution)
-        if config.useDive && stage == 2
+        if config.useDive && st.stage == 2
             printstyled("  [diveSolve] fixing integers to the current rounding and diving to solve for continuous values...\n", color=:yellow)
             feasible, sol = diveSolve(scip, lpCols, intIdx, xRound, ncols)
             if feasible
@@ -402,7 +441,7 @@ function SCIP.find_primal_solution(
                     origObj = origObjective(scip, lpCols, sol, ncols)
                     step = dist(sol, prevProj)
 
-                    logDirectAccept(config, pumpDisplay, stats, stage, origObj, step, heurStartTime, flips, perturbed, restarted, "diveSolve", "DiveSolve")
+                    logDirectAccept(config, pumpDisplay, stats, st.stage, origObj, step, heurStartTime, flips, perturbed, restarted, "diveSolve", "DiveSolve")
                     break
                 end
             end
@@ -420,7 +459,7 @@ function SCIP.find_primal_solution(
         local xProj, projObj, fwIters
         try
             xProj, projObj, fwIters, activeSet = fwProject(
-                config, f, grad!, data.lmo, xFrac, xRound, activeGIntIdx, activeIntIdx,
+                config, f, grad!, data.lmo, xFrac, xRound, st.activeGIntIdx, st.activeIntIdx,
                 activeSet, prevGrad, ncols, remainingTime
             )
         catch e
@@ -435,47 +474,57 @@ function SCIP.find_primal_solution(
         stats.fwIterations += fwIters
 
         if config.verbose >= 4
-            println("   xProj = $(xProj[activeIntIdx])")
+            println("   xProj = $(xProj[st.activeIntIdx])")
         end
 
         # Compute metrics for logging
         origObj = origObjective(scip, lpCols, xProj, ncols)
-        nFrac = countFracVars(scip, activeIntIdx, xProj)
+        nFrac = countFracVars(scip, st.activeIntIdx, xProj)
         step = dist(xProj, prevProj)
         iterTime = timeElapsed(iterStartTime)
 
         # Safety check: FW must always return a feasible point (LP polytope is preserved)
         if !isSolutionLPFeasible(scip, lpRows, lpCols, xProj, colDict)
             stats.exitReason = INFEASIBLE_FW
-            logIteration(config, pumpDisplay, stats, stage, origObj, projObj, step, nFrac, fwIters,
+            logIteration(config, pumpDisplay, stats, st.stage, origObj, projObj, step, nFrac, fwIters,
                 iterTime, heurStartTime, flips, perturbed, restarted, "infeasibleFW", "infeasibleFW")
             break
         end
 
-        # Stagnation tracking
-        if SCIP.SCIPisLT(scip, projObj, bestProjObj) == SCIP.TRUE
-            if projObj / bestProjObj < 1 - DEF_MIN_IMPROVEMENT
-                stagnationCount = 0
+        # Stagnation tracking.
+        # stagnationCount: perturb/restart
+        # stage1NoImpr: stage-1 stall exit
+        if SCIP.SCIPisLT(scip, projObj, st.bestProjObj) == SCIP.TRUE
+            if projObj / st.bestProjObj < 1 - DEF_MIN_IMPROVEMENT
+                st.stagnationCount = 0
+                st.stage == 1 && (st.stage1NoImpr = 0)
             end
-            bestProjObj = projObj
+            st.bestProjObj = projObj
         else
-            stagnationCount += 1
+            st.stagnationCount += 1
+            st.stage == 1 && (st.stage1NoImpr += 1)
+        end
+
+        # Closest point of the stage
+        if SCIP.SCIPisLT(scip, projObj, st.closestDist) == SCIP.TRUE
+            st.closestDist = projObj
+            st.closestFrac .= xProj
         end
 
         # Step 3: Check feasibility and integrality
         if isSolutionIntegral(scip, xProj, intIdx)
             if submitSolution(scip, heur_ptr, lpCols, xProj, ncols)
                 result = recordSolutionFound!(stats, SOLUTION_FWPROJ, scip, heurStartTime)
-                logIteration(config, pumpDisplay, stats, stage, origObj, projObj, step, nFrac, fwIters,
+                logIteration(config, pumpDisplay, stats, st.stage, origObj, projObj, step, nFrac, fwIters,
                     iterTime, heurStartTime, flips, perturbed, restarted, "feasFWProj", "accepted")
 
                 break
             else  # if SCIP rejects the solution, continue
-                logIteration(config, pumpDisplay, stats, stage, origObj, projObj, step, nFrac, fwIters,
+                logIteration(config, pumpDisplay, stats, st.stage, origObj, projObj, step, nFrac, fwIters,
                     iterTime, heurStartTime, flips, perturbed, restarted, "rejected", "rejected")
             end
         else  # if xProj is not integral, continue to the next iteration
-            logIteration(config, pumpDisplay, stats, stage, origObj, projObj, step, nFrac, fwIters,
+            logIteration(config, pumpDisplay, stats, st.stage, origObj, projObj, step, nFrac, fwIters,
                 iterTime, heurStartTime, flips, perturbed, restarted, "", "continuing")
         end
 

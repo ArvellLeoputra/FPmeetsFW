@@ -31,8 +31,7 @@ function formatValue(val::Float64, decimals::Int)
         return fixedStr
     end
 
-    # Integer part exceeds the fixed digit cap: fall back to scientific notation,
-    # which has a fixed length regardless of magnitude.
+    # Integer part exceeds the fixed digit cap: fall back to scientific notation
     return Printf.format(Printf.Format("%.$(decimals)e"), val)
 end
 
@@ -57,11 +56,9 @@ function printRow!(display::PumpDisplay, values...)
 end
 
 function printInitialSolveInfo(scip, initObj, intIdx)
-    # deg measures how degenerate the face is (fraction of non-basic vars with zero reduced cost);
-    # high degeneracy => the projection LMO can jump vertices between pump iterations.
-    # varconsratio estimates the face's dimension
-    deg = Ref{Cdouble}(0.0)
-    varconsratio = Ref{Cdouble}(0.0)
+    deg = Ref{Cdouble}(0.0)  # deg: fraction of non-basic vars with zero reduced cost (degeneracy)
+    # high degeneracy => more likely to have multiple optimal solutions
+    varconsratio = Ref{Cdouble}(0.0)  # varconsratio estimates the face's dimension
     SCIP.@SCIP_CALL SCIP.SCIPgetLPDualDegeneracy(scip, deg, varconsratio)
 
     printstyled("[initialSolve]\n", color=:cyan)

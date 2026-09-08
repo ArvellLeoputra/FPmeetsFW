@@ -21,9 +21,9 @@ const DEF_BIGBIGM = 1e15           # Bigbig M constant for perturbations
 # Staging parameters
 const DEF_STAGE1_MAX_ITER = 10000
 const DEF_STAGE2_MAX_ITER = 2000
-const DEF_STAGE1_STALL_LIMIT = 100  # Max combined perturb+restart attempts in stage 1 before forcing stage 2
+const DEF_STAGE1_NOIMPR_LIMIT = DEF_STAGE1_MAX_ITER ÷ 10  # Stage 1 iteration limit without improvement in bestProjObj
 
-# Global cap on total pump iterations (safety valve; matches fp2's iterLimit)
+# Global cap on total pump iterations
 const DEF_MAX_PUMP_ITER = 12000
 
 # Randomized rounding feasibility check parameters

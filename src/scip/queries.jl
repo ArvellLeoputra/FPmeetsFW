@@ -1,9 +1,11 @@
-function getLPData(scip::Ptr{SCIP.SCIP_}, ncols::Int32, nrows::Int32)
+function getLPInfo(scip::Ptr{SCIP.SCIP_})
+    ncols = SCIP.SCIPgetNLPCols(scip)
+    nrows = SCIP.SCIPgetNLPRows(scip)
     colsPtr = SCIP.SCIPgetLPCols(scip)
     rowsPtr = SCIP.SCIPgetLPRows(scip)
 
-    lpCols = unsafe_wrap(Vector{Ptr{SCIP.SCIP_COL}}, colsPtr, ncols)
-    lpRows = unsafe_wrap(Vector{Ptr{SCIP.SCIP_ROW}}, rowsPtr, nrows)
+    lpCols = copy(unsafe_wrap(Vector{Ptr{SCIP.SCIP_COL}}, colsPtr, ncols))
+    lpRows = copy(unsafe_wrap(Vector{Ptr{SCIP.SCIP_ROW}}, rowsPtr, nrows))
     colDict = Dict(lpCols[k] => k for k in 1:ncols)
 
     binIdx = Int[]
@@ -24,7 +26,8 @@ function getLPData(scip::Ptr{SCIP.SCIP_}, ncols::Int32, nrows::Int32)
         initSol[j] = SCIP.SCIPcolGetPrimsol(lpCols[j])
     end
 
-    return lpCols, lpRows, colDict, binIdx, gIntIdx, initSol
+    return LPInfo(; lpCols, lpRows, colDict, binIdx, gIntIdx,
+                  intIdx = [binIdx; gIntIdx], ncols, nrows, initSol)
 end
 
 function origObjective(scip::Ptr{SCIP.SCIP_}, lpCols::Vector{Ptr{SCIP.SCIP_COL}}, sol::Vector{Float64}, ncols::Int32)

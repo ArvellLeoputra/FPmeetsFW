@@ -118,6 +118,58 @@ solve failing to reach primal feasibility.
 struct LMODeadlineExceeded <: Exception end
 
 """
+StageState
+Per-stage mutable state of the FPFW pump loop. Reset at stage transition by `transitionToStage2!`,
+except `stage1NoImpr`, which is a stage-1-only signal and is never reset on transition.
+"""
+@kwdef mutable struct StageState
+    "active stage: 1 (binaries only) or 2 (all integers)"
+    stage::Int
+    "active integer index set"
+    activeIntIdx::Vector{Int}
+    "active general integer index set"
+    activeGIntIdx::Vector{Int}
+    "average number of variable flips per perturbation/restart (~10% of the active integers, min 1)"
+    avgFlips::Int = max(1, ceil(Int, 0.1 * length(activeIntIdx)))
+    "iteration count of current stage"
+    stageIter::Int = 0
+    "hash for last rounded point"
+    prevHash::UInt = UInt(0)
+    "lowest FW projection objective (distance from the projected point to its rounding target)
+    since the last reset (reset on transition, perturb, and restart)"
+    bestProjObj::Float64 = Inf
+    "iterations with no improvement in bestProjObj, reset on transition/perturb/restart
+    and if there is significant improvement (DEF_MIN_IMPROVEMENT)"
+    stagnationCount::Int = 0
+    "perturbs since the last restart or stage start"
+    consecutivePerturbs::Int = 0
+    "stage-1 only: iterations since the last significant (DEF_MIN_IMPROVEMENT) gain in bestProjObj,
+    same as stagnationCount, but never reset on perturb/restart"
+    stage1NoImpr::Int = 0
+    "lowest FW projection objective seen this stage, reset only on transition"
+    closestDist::Float64 = Inf
+    "the FW projection that achieved closestDist; seeds stage 2's starting point at the transition"
+    closestFrac::Vector{Float64}
+end
+
+"""
+LPInfo
+A struct that holds the LP data for the FPFW heuristic,
+received from getLPInfo function in src/scip/queries.jl
+"""
+@kwdef struct LPInfo
+    lpCols::Vector{Ptr{SCIP.SCIP_COL}}
+    lpRows::Vector{Ptr{SCIP.SCIP_ROW}}
+    colDict::Dict{Ptr{SCIP.SCIP_COL}, Int}
+    binIdx::Vector{Int}
+    gIntIdx::Vector{Int}
+    intIdx::Vector{Int}
+    ncols::Int32
+    nrows::Int32
+    initSol::Vector{Float64}
+end
+
+"""
 FPFWRunData
 A struct that holds the runtime data for a run of the FPFW heuristic.
 """
