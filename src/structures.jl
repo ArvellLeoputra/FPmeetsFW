@@ -16,6 +16,10 @@ The fields can be set via a configuration file or command-line arguments.
     fwStepSize::Symbol = :unitary
     "time budget in seconds for the FPFW heuristic only"
     timeLimit::Float64 = 300.0
+    "objective weight for objective feasibility pump"
+    alpha::Float64 = DEF_ALPHA
+    "geometric decay factor applied to alpha each pump iteration"
+    alphaFactor::Float64 = DEF_ALPHA_FACTOR
     "pump rounding step: use a randomized threshold (Bertacco et al., 2007)"
     randRound::Bool = false
     "probabilistically round the current LP point x as a cheap feasibility attempt;
@@ -160,6 +164,10 @@ received from getLPInfo function in src/scip/queries.jl
 @kwdef struct LPInfo
     lpCols::Vector{Ptr{SCIP.SCIP_COL}}
     lpRows::Vector{Ptr{SCIP.SCIP_ROW}}
+    "objective function value of variable"
+    objCoeffs::Vector{Float64}
+    "objective function scale (Euclidean norm of objCoeffs)"
+    objScale::Float64
     colDict::Dict{Ptr{SCIP.SCIP_COL}, Int}
     binIdx::Vector{Int}
     gIntIdx::Vector{Int}

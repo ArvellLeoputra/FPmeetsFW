@@ -18,6 +18,11 @@ const DEF_MAX_PERTURBS = 10        # Cumulative perturbs in current stage before
 const DEF_BIGM = 1e9               # Big M constant for cycle-breaking perturbations
 const DEF_BIGBIGM = 1e15           # Bigbig M constant for perturbations
 
+# Objective Feasibility Pump parameters
+const DEF_ALPHA = 0.0  # initial objective weight
+const DEF_ALPHA_FACTOR = 0.9  # geometric decay per iteration
+const DEF_ALPHA_MIN = 1e-4  # alpha at or below this snaps to 0
+
 # Staging parameters
 const DEF_STAGE1_MAX_ITER = 10000
 const DEF_STAGE2_MAX_ITER = 2000

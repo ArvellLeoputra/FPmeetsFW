@@ -45,8 +45,6 @@ end
 # Advance `st` from stage 1 (binaries only) to stage 2 (all integers): widen the active sets,
 # rebuild the LMO and FW functions, reset the per-stage counters and cycle cache, and resume
 # xFrac/prevProj from the closest point stage 1 reached.
-# Returns (activeSet, f, grad!, dist) for the caller to rebind — activeSet is a fresh (nothing)
-# FW warm start for the new stage.
 function transitionToStage2!(
     st::StageState,
     scip::Ptr{SCIP.SCIP_},
@@ -111,6 +109,7 @@ function fwProject(
     config::FPFWConfig,
     f::Function,
     grad!::Function,
+    dist::Function,
     lmo::FrankWolfe.LinearMinimizationOracle,
     xFrac::Vector{Float64},
     xRound::Vector{Float64},
@@ -164,7 +163,8 @@ function fwProject(
     )
 
     xProj = config.norm == :manhattan ? fwResult.x[1:ncols] : fwResult.x
-    projObj = f(fwResult.x)  # FW objective: distance from xProj to the rounded target
+    projObj = dist(xProj, xRound)  # pure distance to the rounding target
+
     fwIters = isempty(fwResult.traj_data) ? 0 : fwResult.traj_data[end][1]
 
     # Update the active set for warm-starting the next FW iteration (if enabled)
@@ -249,13 +249,16 @@ function SCIP.find_primal_solution(
     prevGrad = zeros(Float64, ncols)  # for detecting gradient flips in smooth norms (only used at verbose >= 2)
     f, grad!, dist = buildFWFunctions(config.norm, binIdx, st.activeGIntIdx, st.activeIntIdx, xRound)
 
+    # Objective feasibility pump: initial weight, disabled when there's no objective
+    alpha = lp.objScale > 0.0 ? config.alpha : 0.0
+
     # Cycle detection cache (only used with unitary step size)
     visitedRounded = Set{UInt}()
 
     # TODO: store the best solution found across iterations, not just the first one
     # foundSolution = nothing
 
-    pumpDisplay = config.verbose == 1 ? setupPumpDisplay() : nothing
+    pumpDisplay = config.verbose == 1 ? setupPumpDisplay(config) : nothing
 
     # Main FPFW loop
     result = SCIP.SCIP_DIDNOTFIND
@@ -307,7 +310,7 @@ function SCIP.find_primal_solution(
                 origObj = origObjective(scip, lpCols, xProbe, ncols)
                 step = dist(xProbe, prevProj)
 
-                logDirectAccept(config, pumpDisplay, stats, st.stage, origObj, step, heurStartTime, flips, perturbed, restarted, "randFeasCheck", "RandFeasCheck")
+                logDirectAccept(config, pumpDisplay, stats, st.stage, alpha, origObj, step, heurStartTime, flips, perturbed, restarted, "randFeasCheck", "RandFeasCheck")
 
                 break
             end
@@ -426,7 +429,7 @@ function SCIP.find_primal_solution(
             origObj = origObjective(scip, lpCols, xRound, ncols)
             step = dist(xRound, prevProj)
 
-            logDirectAccept(config, pumpDisplay, stats, st.stage, origObj, step, heurStartTime, flips, perturbed, restarted, "feasRound", "FeasRound")
+            logDirectAccept(config, pumpDisplay, stats, st.stage, alpha, origObj, step, heurStartTime, flips, perturbed, restarted, "feasRound", "FeasRound")
 
             break
         end
@@ -441,13 +444,17 @@ function SCIP.find_primal_solution(
                     origObj = origObjective(scip, lpCols, sol, ncols)
                     step = dist(sol, prevProj)
 
-                    logDirectAccept(config, pumpDisplay, stats, st.stage, origObj, step, heurStartTime, flips, perturbed, restarted, "diveSolve", "DiveSolve")
+                    logDirectAccept(config, pumpDisplay, stats, st.stage, alpha, origObj, step, heurStartTime, flips, perturbed, restarted, "diveSolve", "DiveSolve")
                     break
                 end
             end
         end
 
         # Step 2: "Projection" using Frank-Wolfe
+        distScale = sqrt(length(st.activeIntIdx))  # || delta ||
+        weight = alpha > 0.0 ? distScale / max(lp.objScale, 1.0) : 0.0
+        fOFP, gradOFP! = buildOFPFunctions(f, grad!, alpha, weight, lp.objCoeffs, ncols)
+
         remainingTime = heurTimeLimit - timeElapsed(heurStartTime)
         fwStartTime = time()
 
@@ -459,7 +466,7 @@ function SCIP.find_primal_solution(
         local xProj, projObj, fwIters
         try
             xProj, projObj, fwIters, activeSet = fwProject(
-                config, f, grad!, data.lmo, xFrac, xRound, st.activeGIntIdx, st.activeIntIdx,
+                config, fOFP, gradOFP!, dist, data.lmo, xFrac, xRound, st.activeGIntIdx, st.activeIntIdx,
                 activeSet, prevGrad, ncols, remainingTime
             )
         catch e
@@ -486,12 +493,12 @@ function SCIP.find_primal_solution(
         # Safety check: FW must always return a feasible point (LP polytope is preserved)
         if !isSolutionLPFeasible(scip, lpRows, lpCols, xProj, colDict)
             stats.exitReason = INFEASIBLE_FW
-            logIteration(config, pumpDisplay, stats, st.stage, origObj, projObj, step, nFrac, fwIters,
+            logIteration(config, pumpDisplay, stats, st.stage, alpha, origObj, projObj, step, nFrac, fwIters,
                 iterTime, heurStartTime, flips, perturbed, restarted, "infeasibleFW", "infeasibleFW")
             break
         end
 
-        # Stagnation tracking.
+        # Stagnation tracking
         # stagnationCount: perturb/restart
         # stage1NoImpr: stage-1 stall exit
         if SCIP.SCIPisLT(scip, projObj, st.bestProjObj) == SCIP.TRUE
@@ -515,17 +522,24 @@ function SCIP.find_primal_solution(
         if isSolutionIntegral(scip, xProj, intIdx)
             if submitSolution(scip, heur_ptr, lpCols, xProj, ncols)
                 result = recordSolutionFound!(stats, SOLUTION_FWPROJ, scip, heurStartTime)
-                logIteration(config, pumpDisplay, stats, st.stage, origObj, projObj, step, nFrac, fwIters,
+                logIteration(config, pumpDisplay, stats, st.stage, alpha, origObj, projObj, step, nFrac, fwIters,
                     iterTime, heurStartTime, flips, perturbed, restarted, "feasFWProj", "accepted")
 
                 break
             else  # if SCIP rejects the solution, continue
-                logIteration(config, pumpDisplay, stats, st.stage, origObj, projObj, step, nFrac, fwIters,
+                logIteration(config, pumpDisplay, stats, st.stage, alpha, origObj, projObj, step, nFrac, fwIters,
                     iterTime, heurStartTime, flips, perturbed, restarted, "rejected", "rejected")
             end
         else  # if xProj is not integral, continue to the next iteration
-            logIteration(config, pumpDisplay, stats, st.stage, origObj, projObj, step, nFrac, fwIters,
+            logIteration(config, pumpDisplay, stats, st.stage, alpha, origObj, projObj, step, nFrac, fwIters,
                 iterTime, heurStartTime, flips, perturbed, restarted, "", "continuing")
+        end
+
+        if alpha > 0.0
+            alpha *= config.alphaFactor
+            if alpha <= DEF_ALPHA_MIN
+                alpha = 0.0
+            end
         end
 
         # Continue with the projected solution for next FW iteration

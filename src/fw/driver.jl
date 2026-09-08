@@ -90,6 +90,41 @@ function buildFWFunctions(
     return f, grad!, dist
 end
 
+# Wrap the pure-distance with the objective-FP term:
+#   f_alpha(x) = (1-alpha)·f(x) + alpha·weight·sum(objCoeffs[j]·x[j])
+# Aux entries for manhattan get the (1-alpha) scale but no objCoef.
+function buildOFPFunctions(
+    f,
+    grad!,
+    alpha::Float64,
+    weight::Float64,
+    objCoeffs::Vector{Float64},
+    ncols::Int32
+)
+    if alpha == 0.0
+        return f, grad!
+    end
+
+    fOFP = x -> begin
+        objTerm = 0.0
+        for j in 1:ncols
+            objTerm += objCoeffs[j] * x[j]
+        end
+        (1 - alpha) * f(x) + alpha * weight * objTerm
+    end
+
+    gradOFP! = (storage, x) -> begin
+        grad!(storage, x)
+        storage .*= (1 - alpha)
+        for j in 1:ncols
+            storage[j] += alpha * weight * objCoeffs[j]
+        end
+        return storage
+    end
+
+    return fOFP, gradOFP!
+end
+
 function buildLineSearch(fwStepSize::Symbol)
     if fwStepSize == :unitary
         FrankWolfe.FixedStep(1.0)

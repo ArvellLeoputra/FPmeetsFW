@@ -84,10 +84,11 @@ function printInitialBasisInfo(cstat, rstat)
         count(==(0), rstat), count(==(1), rstat), count(==(2), rstat))
 end
 
-function setupPumpDisplay()
+function setupPumpDisplay(config)
     pumpDisplay = PumpDisplay(PumpDisplayColumn[])
     addColumn!(pumpDisplay, "iter", 7)
     addColumn!(pumpDisplay, "stage", 7)
+    config.alpha > 0.0 && addColumn!(pumpDisplay, "alpha", 9, 4)
     addColumn!(pumpDisplay, "origObj", 15, 2)
     addColumn!(pumpDisplay, "projObj", 15, 4)
     addColumn!(pumpDisplay, "step", 15, 4)
@@ -108,6 +109,7 @@ end
 # Verbose-mode counterpart to printRow! for a single FW-projection iteration
 function printVerboseIteration(
     stage::Int,
+    alpha::Float64,
     origObj::Float64,
     projObj::Float64,
     step::Float64,
@@ -119,35 +121,39 @@ function printVerboseIteration(
     restarted::Bool,
     outcome::String
 )
-    @printf("FW: stage=%d origObj=%.4f projObj=%.4f step=%.4f nFrac=%d fwIters=%d iterTime=%.4fs #flips=%s P=%s R=%s -> %s\n",
-        stage, origObj, projObj, step, nFrac, fwIters, iterTime, flips,
+    alphaStr = alpha > 0.0 ? @sprintf("alpha=%.4f ", alpha) : ""
+    @printf("FW: stage=%d %sorigObj=%.4f projObj=%.4f step=%.4f nFrac=%d fwIters=%d iterTime=%.4fs #flips=%s P=%s R=%s -> %s\n",
+        stage, alphaStr, origObj, projObj, step, nFrac, fwIters, iterTime, flips,
         perturbed ? "*" : " ", restarted ? "*" : " ", outcome)
 end
 
 # Logs one FW-projection iteration's outcome
 function logIteration(
-    config, pumpDisplay, stats, stage, origObj, projObj, step, nFrac, fwIters,
+    config, pumpDisplay, stats, stage, alpha, origObj, projObj, step, nFrac, fwIters,
     iterTime, heurStartTime, flips, perturbed, restarted, rowLabel, verboseLabel
 )
     if config.verbose == 1
-        printRow!(pumpDisplay, stats.pumpIterations, stage, origObj, projObj, step, nFrac, fwIters,
+        head = config.alpha > 0.0 ? (stats.pumpIterations, stage, alpha) : (stats.pumpIterations, stage)
+        printRow!(pumpDisplay, head..., origObj, projObj, step, nFrac, fwIters,
             timeElapsed(heurStartTime), formatFlips(flips), perturbed ? "*" : "", restarted ? "*" : "", rowLabel)
-    
+
     elseif config.verbose >= 2
-        printVerboseIteration(stage, origObj, projObj, step, nFrac, fwIters, iterTime,
+        printVerboseIteration(stage, alpha, origObj, projObj, step, nFrac, fwIters, iterTime,
             formatFlips(flips), perturbed, restarted, verboseLabel)
     end
 end
 
 # Logs a direct-acceptance event (RandFeasCheck / FeasRound / DiveSolve)
-function logDirectAccept(config, pumpDisplay, stats, stage, origObj, step, heurStartTime, flips, perturbed, restarted, rowLabel, verboseLabel)
+function logDirectAccept(config, pumpDisplay, stats, stage, alpha, origObj, step, heurStartTime, flips, perturbed, restarted, rowLabel, verboseLabel)
     elapsed = timeElapsed(heurStartTime)
     if config.verbose == 1
-        printRow!(pumpDisplay, stats.pumpIterations, stage, origObj, 0.0, step, 0, 0, elapsed,
+        head = config.alpha > 0.0 ? (stats.pumpIterations, stage, alpha) : (stats.pumpIterations, stage)
+        printRow!(pumpDisplay, head..., origObj, 0.0, step, 0, 0, elapsed,
             formatFlips(flips), perturbed ? "*" : "", restarted ? "*" : "", rowLabel)
 
     elseif config.verbose >= 2
-        @printf("%s: stage=%d origObj=%.4f step=%.4f elapsed=%.4fs #flips=%s P=%s R=%s\n",
-            verboseLabel, stage, origObj, step, elapsed, formatFlips(flips), perturbed ? "*" : " ", restarted ? "*" : " ")
+        alphaStr = alpha > 0.0 ? @sprintf("alpha=%.4f ", alpha) : ""
+        @printf("%s: stage=%d %sorigObj=%.4f step=%.4f elapsed=%.4fs #flips=%s P=%s R=%s\n",
+            verboseLabel, stage, alphaStr, origObj, step, elapsed, formatFlips(flips), perturbed ? "*" : " ", restarted ? "*" : " ")
     end
 end

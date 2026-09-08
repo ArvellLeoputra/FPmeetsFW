@@ -10,10 +10,12 @@ function getLPInfo(scip::Ptr{SCIP.SCIP_})
 
     binIdx = Int[]
     gIntIdx = Int[]
+    objCoeffs = zeros(SCIP.SCIP_Real, ncols)
     initSol = zeros(SCIP.SCIP_Real, ncols)
 
     for j in 1:ncols
         var = SCIP.SCIPcolGetVar(lpCols[j])
+        objCoeffs[j] = SCIP.SCIPvarGetObj(var)
 
         # Remove fixed variables from the index lists
         isFixed = SCIP.SCIPvarGetLbLocal(var) == SCIP.SCIPvarGetUbLocal(var)
@@ -26,7 +28,9 @@ function getLPInfo(scip::Ptr{SCIP.SCIP_})
         initSol[j] = SCIP.SCIPcolGetPrimsol(lpCols[j])
     end
 
-    return LPInfo(; lpCols, lpRows, colDict, binIdx, gIntIdx,
+    objScale = sqrt(sum(abs2, objCoeffs))
+
+    return LPInfo(; lpCols, lpRows, objCoeffs, objScale, colDict, binIdx, gIntIdx,
                   intIdx = [binIdx; gIntIdx], ncols, nrows, initSol)
 end
 

@@ -27,6 +27,8 @@ function buildFPFWConfig(params::Dict{String, String})
         "fwMaxIterations",
         "fwStepSize",
         "timeLimit",
+        "alpha",
+        "alphaFactor",
         "randomizedRounding",
         "randomFeasibilityCheck",
         "fwWarmStart",
@@ -49,6 +51,8 @@ function buildFPFWConfig(params::Dict{String, String})
     fwMaxIterations = parse(Int, params["fwMaxIterations"])
     fwStepSize = Symbol(params["fwStepSize"])
     timeLimit = parse(Float64, params["timeLimit"])
+    alpha = parse(Float64, params["alpha"])
+    alphaFactor = parse(Float64, params["alphaFactor"])
     randRound = parse(Bool, params["randomizedRounding"])
     randFeasCheck = parse(Bool, params["randomFeasibilityCheck"])
     fwWarmStart = parse(Bool, params["fwWarmStart"])
@@ -88,6 +92,14 @@ function buildFPFWConfig(params::Dict{String, String})
         error("Invalid fwMaxIterations: $fwMaxIterations. Must be a positive integer")
     end
 
+    if alpha < 0.0 || alpha > 1.0
+        error("Invalid alpha: $alpha. Must be in [0, 1]")
+    end
+
+    if alphaFactor <= 0.0 || alphaFactor >= 1.0
+        error("Invalid alphaFactor: $alphaFactor. Must be in (0, 1)")
+    end
+
     return FPFWConfig(
         runName = runName,
         norm = norm,
@@ -95,6 +107,8 @@ function buildFPFWConfig(params::Dict{String, String})
         fwMaxIterations = fwMaxIterations,
         fwStepSize = fwStepSize,
         timeLimit = timeLimit,
+        alpha = alpha,
+        alphaFactor = alphaFactor,
         randRound = randRound,
         randFeasCheck = randFeasCheck,
         fwWarmStart = fwWarmStart,
