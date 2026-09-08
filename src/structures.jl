@@ -152,8 +152,12 @@ except `stage1NoImpr`, which is a stage-1-only signal and is never reset on tran
     stage1NoImpr::Int = 0
     "lowest FW projection objective seen this stage, reset only on transition"
     closestDist::Float64 = Inf
-    "the FW projection that achieved closestDist; seeds stage 2's starting point at the transition"
+    "FW projection that achieved closestDist (LP-feasible); the stage-2 FW start at the transition"
     closestFrac::Vector{Float64}
+    "the rounding that projection was aimed at; the stage-2 rounding target on the first iteration"
+    closestRound::Vector{Float64}
+    "set by transitionToStage2!, cleared after one iteration: the next rounding targets closestRound"
+    transitioned::Bool = false
 end
 
 """

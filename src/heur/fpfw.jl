@@ -70,8 +70,9 @@ function transitionToStage2!(
     st.bestProjObj = Inf
     st.stagnationCount = 0
     st.consecutivePerturbs = 0
+    st.transitioned = true
 
-    # Resume stage 2 from the closest point stage 1 found
+    # Resume stage 2 from stage 1's closest projection and rounded point.
     xFrac .= st.closestFrac
     prevProj .= st.closestFrac
     st.closestDist = Inf
@@ -225,9 +226,9 @@ function SCIP.find_primal_solution(
 
     # Per-stage state
     if countFracVars(scip, binIdx, initSol) > 0
-        st = StageState(; stage=1, activeIntIdx=binIdx, activeGIntIdx=Int[], closestFrac=copy(initSol))
+        st = StageState(; stage=1, activeIntIdx=binIdx, activeGIntIdx=Int[], closestFrac=copy(initSol), closestRound=copy(initSol))
     else
-        st = StageState(; stage=2, activeIntIdx=intIdx, activeGIntIdx=gIntIdx, closestFrac=copy(initSol))
+        st = StageState(; stage=2, activeIntIdx=intIdx, activeGIntIdx=gIntIdx, closestFrac=copy(initSol), closestRound=copy(initSol))
     end
 
     if config.verbose >= 2
@@ -316,8 +317,14 @@ function SCIP.find_primal_solution(
             end
         end
 
-        # Step 1: Round LP-feasible solution w.r.t. the current stage's active integer variables
-        roundSolution!(xRound, xFrac, st.activeIntIdx, config.randRound)
+        # Step 1: Round LP-feasible solution w.r.t. the current stage's active integer variables.
+        if st.transitioned
+            # First stage-2 iterate: keep stage 1's binary rounding, round general integers only
+            roundSolution!(xRound, st.closestRound, gIntIdx, config.randRound)
+            st.transitioned = false
+        else
+            roundSolution!(xRound, xFrac, st.activeIntIdx, config.randRound)
+        end
 
         # Rounding debug info
         if config.verbose >= 2
@@ -516,6 +523,7 @@ function SCIP.find_primal_solution(
         if SCIP.SCIPisLT(scip, projObj, st.closestDist) == SCIP.TRUE
             st.closestDist = projObj
             st.closestFrac .= xProj
+            st.closestRound .= xRound
         end
 
         # Step 3: Check feasibility and integrality
