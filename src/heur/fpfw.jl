@@ -60,7 +60,7 @@ function transitionToStage2!(
     st.stageIter = 0
     st.activeGIntIdx = lp.gIntIdx
     st.activeIntIdx = lp.intIdx
-    st.avgFlips = max(1, ceil(Int, 0.1 * length(lp.intIdx)))
+    st.avgFlips = min(DEF_AVG_FLIPS, length(lp.intIdx))
 
     setupLMO!(scip, data, config, lp, st.activeGIntIdx, st.stage; freeOld=true)
     f, grad!, dist = buildFWFunctions(config.norm, lp.binIdx, st.activeGIntIdx, st.activeIntIdx, xRound)
@@ -505,15 +505,13 @@ function SCIP.find_primal_solution(
             break
         end
 
-        # Stagnation tracking
-        # stagnationCount: perturb/restart
-        # stage1NoImpr: stage-1 stall exit
-        if SCIP.SCIPisLT(scip, projObj, st.bestProjObj) == SCIP.TRUE
-            if projObj / st.bestProjObj < 1 - DEF_MIN_IMPROVEMENT
-                st.stagnationCount = 0
-                st.stage == 1 && (st.stage1NoImpr = 0)
-            end
+        # Stagnation tracking (stagnationCount: perturb/restart; stage1NoImpr: stage-1 stall exit).
+        # Count any iteration that doesn't drop projObj by at least DEF_MIN_IMPROVEMENT relative to
+        # the value at the last reset — a slow monotonic crawl (FW not fully converging) still stalls.
+        if projObj < st.bestProjObj * (1 - DEF_MIN_IMPROVEMENT)
             st.bestProjObj = projObj
+            st.stagnationCount = 0
+            st.stage == 1 && (st.stage1NoImpr = 0)
         else
             st.stagnationCount += 1
             st.stage == 1 && (st.stage1NoImpr += 1)

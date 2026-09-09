@@ -133,8 +133,8 @@ except `stage1NoImpr`, which is a stage-1-only signal and is never reset on tran
     activeIntIdx::Vector{Int}
     "active general integer index set"
     activeGIntIdx::Vector{Int}
-    "average number of variable flips per perturbation/restart (~10% of the active integers, min 1)"
-    avgFlips::Int = max(1, ceil(Int, 0.1 * length(activeIntIdx)))
+    "average number of variable flips per perturbation/restart"
+    avgFlips::Int = min(DEF_AVG_FLIPS, length(activeIntIdx))
     "iteration count of current stage"
     stageIter::Int = 0
     "hash for last rounded point"
@@ -168,9 +168,9 @@ received from getLPInfo function in src/scip/queries.jl
 @kwdef struct LPInfo
     lpCols::Vector{Ptr{SCIP.SCIP_COL}}
     lpRows::Vector{Ptr{SCIP.SCIP_ROW}}
-    "objective function value of variable"
+    "coefficient per LP column"
     objCoeffs::Vector{Float64}
-    "objective function scale (Euclidean norm of objCoeffs)"
+    "objective function scale (euclidean norm of objCoeffs)"
     objScale::Float64
     colDict::Dict{Ptr{SCIP.SCIP_COL}, Int}
     binIdx::Vector{Int}
