@@ -78,17 +78,25 @@ Used for logging and reporting purposes.
     primalIntegral::Float64 = 0.0
     primalEvents::Vector{Tuple{Float64, Float64}} = Tuple{Float64, Float64}[]
 
-    "time breakdown in seconds: total solve, SCIP's own time before the heuristic was called
-    (reading, presolve, root LP), heuristic wall time, randomized feasibility-check time, FW-solve time"
+    "time breakdown in seconds: total solve, SCIP's own time before the heuristic was called (reading, presolve, root LP),
+    heuristic wall time, randomized feasibility-check time, FW-solve time, diveSolve LP time, LMO build time"
     totalTime::Float64 = 0.0
     rootTime::Float64 = 0.0
     heurTime::Float64 = 0.0
     rrTime::Float64 = 0.0
     fwTime::Float64 = 0.0
+    diveTime::Float64 = 0.0
+    setupTime::Float64 = 0.0
 
     "iteration statistics"
     pumpIterations::Int = 0
     fwIterations::Int = 0
+    
+    "times randFeasCheck! / diveSolve were called"
+    rfcCalls::Int = 0
+    diveCalls::Int = 0
+    "times submitSolution(xRound) actually ran (vs pumpIterations — the gap is the repeatRound skip)"
+    roundSubmits::Int = 0
 
     "perturbation and restart statistics"
     perturbCount::Int = 0
@@ -147,8 +155,8 @@ except `stage1NoImpr`, which is a stage-1-only signal and is never reset on tran
     stagnationCount::Int = 0
     "perturbs since the last restart or stage start"
     consecutivePerturbs::Int = 0
-    "stage-1 only: iterations since the last significant (DEF_MIN_IMPROVEMENT) gain in bestProjObj,
-    same as stagnationCount, but never reset on perturb/restart"
+    "stage-1 only: iterations since the last significant (DEF_MIN_IMPROVEMENT) gain vs closestDist
+    (the stage's all-time best), so it survives perturb/restart. Forces the stage 1 -> 2 handoff."
     stage1NoImpr::Int = 0
     "lowest FW projection objective seen this stage, reset only on transition"
     closestDist::Float64 = Inf

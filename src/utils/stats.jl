@@ -141,7 +141,12 @@ function printResults(stats::FPFWStats)
         println("heurTime = $(round(stats.heurTime, digits=2))s")
         println("fwTime = $(round(stats.fwTime, digits=2))s")
         println("randRoundTime = $(round(stats.rrTime, digits=2))s")
+        println("diveTime = $(round(stats.diveTime, digits=2))s")
+        println("setupTime = $(round(stats.setupTime, digits=2))s")
         println("pumpIterations = $(stats.pumpIterations)")
+        println("rfcCalls = $(stats.rfcCalls)")
+        println("diveCalls = $(stats.diveCalls)")
+        println("roundSubmits = $(stats.roundSubmits)")
         println("fwIterations = $(stats.fwIterations)")
         println("perturbCount = $(stats.perturbCount)")
         println("restartCount = $(stats.restartCount)")
@@ -166,6 +171,11 @@ function writeResults(stats::FPFWStats, config::FPFWConfig, fileName::String, re
         "heurTime" => stats.heurTime,
         "fwTime" => stats.fwTime,
         "randRoundTime" => stats.rrTime,
+        "diveTime" => stats.diveTime,
+        "setupTime" => stats.setupTime,
+        "rfcCalls" => stats.rfcCalls,
+        "diveCalls" => stats.diveCalls,
+        "roundSubmits" => stats.roundSubmits,
         "pumpIterations" => stats.pumpIterations,
         "fwIterations" => stats.fwIterations,
         "perturbCount" => stats.perturbCount,

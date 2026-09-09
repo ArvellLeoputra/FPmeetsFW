@@ -1,14 +1,24 @@
 # Fix integer variables to xRound and solve the LP to adjust continuous variables
-# Fallback when xRound alone is not accepted as a feasible MIP solution
+# Fallback when xRound alone is not accepted as a feasible MIP solution.
+# `remainingTime` (seconds) bounds the dive LP: SCIPsolveDiveLP has no time argument, so we
+# temporarily tighten `limits/time` (the diving solve derives its deadline from it) and restore
+# it afterwards. A timed-out dive returns solstat != OPTIMAL, handled by the non-OPTIMAL branch.
 function diveSolve(
     scip::Ptr{SCIP.SCIP_},
     lpCols::Vector{Ptr{SCIP.SCIP_COL}},
     intIdx::Vector{Int},
     xRound::Vector{Float64},
-    ncols::Int32
+    ncols::Int32,
+    remainingTime::Float64
 )::Tuple{Bool, Vector{Float64}}
+    # temporarily save the current SCIP time limit
+    prevTimeLimit = Ref{SCIP.SCIP_Real}(0.0)
+    SCIP.@SCIP_CALL SCIP.SCIPgetRealParam(scip, "limits/time", prevTimeLimit)
+
     SCIP.SCIPstartDive(scip)
     try
+        SCIP.@SCIP_CALL SCIP.SCIPsetRealParam(scip, "limits/time", SCIP.SCIPgetSolvingTime(scip) + max(1e-3, remainingTime))
+
         # Fix integer variables to their rounded values
         for i in intIdx
             var = SCIP.SCIPcolGetVar(lpCols[i])
@@ -33,6 +43,8 @@ function diveSolve(
         end
     finally
         SCIP.SCIPendDive(scip)
+        # restore the SCIP time limit
+        SCIP.@SCIP_CALL SCIP.SCIPsetRealParam(scip, "limits/time", prevTimeLimit[])
     end
 end
 

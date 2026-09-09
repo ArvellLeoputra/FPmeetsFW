@@ -243,10 +243,9 @@ function FrankWolfe.compute_extreme_point(lmo::LPILMO, direction::AbstractVector
     rstatBefore = zeros(Cint, nrowsRef[])
     SCIP.SCIPlpiGetBase(lmo.lpi, cstatBefore, rstatBefore)
 
-    # Cap this single solve to whatever's left of the heuristic's own time budget, so one slow LP solve can't run 
-    # unbounded and get the whole process killed by an external wall-clock limit instead of exiting cleanly
-    lpTimeLeft = min(DEF_SCIP_TIME_LIMIT, max(0.0, lmo.deadline[] - time()))
-    SCIP.@SCIP_CALL SCIP.SCIPlpiSetRealpar(lmo.lpi, SCIP.SCIP_LPPAR_LPTILIM, lpTimeLeft)  # SCIP_LPPAR_LPTILIM: LP time limit (> 0)
+    # Time limit setting, floored at 1ms, instead of 0, to avoid no limit for time limit.
+    lpTimeLeft = min(DEF_SCIP_TIME_LIMIT, max(1e-3, lmo.deadline[] - time()))
+    SCIP.@SCIP_CALL SCIP.SCIPlpiSetRealpar(lmo.lpi, SCIP.SCIP_LPPAR_LPTILIM, lpTimeLeft)
 
     # Solve with dual simplex
     SCIP.@SCIP_CALL SCIP.SCIPlpiSolveDual(lmo.lpi)

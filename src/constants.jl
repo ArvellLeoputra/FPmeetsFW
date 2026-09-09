@@ -27,13 +27,14 @@ const DEF_ALPHA_MIN = 1e-4  # alpha at or below this snaps to 0
 # Staging parameters
 const DEF_STAGE1_MAX_ITER = 10000
 const DEF_STAGE2_MAX_ITER = 2000
-const DEF_STAGE1_NOIMPR_LIMIT = DEF_STAGE1_MAX_ITER ÷ 10  # Stage 1 iteration limit without improvement in bestProjObj
+const DEF_STAGE1_NOIMPR_LIMIT = DEF_STAGE1_MAX_ITER ÷ 100  # Stage 1 iters without a real closestDist gain before forcing stage 2
 
 # Global cap on total pump iterations
 const DEF_MAX_PUMP_ITER = 12000
 
 # Randomized rounding feasibility check parameters
-const DEF_RAND_FEAS_ITER_LIMIT = 100
+const DEF_RAND_FEAS_ITER_LIMIT = 20   # max probabilistic-rounding probes per call
+const DEF_RAND_FEAS_MAX_FRAC = 15     # skip the check when more integer vars than this are fractional
 
 # Pump display formatting parameters
 const DEF_MAX_INT_DIGITS = 7  # switch a float column to scientific notation beyond this many integer digits

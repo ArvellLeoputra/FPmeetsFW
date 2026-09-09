@@ -9,6 +9,7 @@ function setupLMO!(
     stage::Int;
     freeOld::Bool = false
 )
+    setupStart = time()
     if config.lmoWarmStart
         if freeOld
             oldLpiRef = Ref(data.lmo.lpi)
@@ -25,12 +26,13 @@ function setupLMO!(
     else
         data.lmo, data.auxConstraintRefs = SCIPbuildLMO(scip, lp.lpCols, lp.lpRows, lp.colDict, activeGIntIdx, config.norm, lp.ncols, lp.nrows)
     end
+    data.stats.setupTime += timeElapsed(setupStart)
 end
 
 # Check if stage 1 is complete
 #  1. All binaries are integral in xFrac, or
 #  2. Stage 1 hit its iteration cap, or
-#  3. Stage 1 stalled (DEF_STAGE1_NOIMPR_LIMIT iterations with no real bestProjObj gain)
+#  3. Stage 1 stalled (DEF_STAGE1_NOIMPR_LIMIT iterations with no real closestDist gain)
 function stage1Complete(
     st::StageState,
     scip::Ptr{SCIP.SCIP_},
@@ -38,7 +40,7 @@ function stage1Complete(
     xFrac::Vector{Float64}
 )::Bool
     return countFracVars(scip, lp.binIdx, xFrac) == 0 ||
-           st.stageIter > DEF_STAGE1_MAX_ITER ||
+           st.stageIter >= DEF_STAGE1_MAX_ITER ||
            st.stage1NoImpr > DEF_STAGE1_NOIMPR_LIMIT
 end
 
@@ -90,7 +92,17 @@ function randFeasCheck!(
     xFrac::Vector{Float64},
     xProbe::Vector{Float64}
 )::Bool
-    for _ in 1:DEF_RAND_FEAS_ITER_LIMIT
+    k = count(i -> !isVarInteger(scip, xFrac[i]), lp.intIdx)
+
+    # Cap the nFrac to minimize randRound time
+    if k == 0 || k > DEF_RAND_FEAS_MAX_FRAC
+        return false
+    end
+
+    # Cap nProbes to 2^k, where k = # fractional integer vars
+    nProbes = min(DEF_RAND_FEAS_ITER_LIMIT, 1 << min(k, 10))
+
+    for _ in 1:nProbes
         xProbe .= xFrac
         for i in lp.intIdx
             # Round up with probability xFrac[i] - floor(xFrac[i]), otherwise round down
@@ -271,7 +283,7 @@ function SCIP.find_primal_solution(
         end
 
         # Check stage 2 iteration cap
-        if st.stage == 2 && st.stageIter > DEF_STAGE2_MAX_ITER
+        if st.stage == 2 && st.stageIter >= DEF_STAGE2_MAX_ITER
             stats.exitReason = ITER_LIMIT
             break
         end
@@ -283,7 +295,7 @@ function SCIP.find_primal_solution(
         end
 
         # Check global iteration limit (should rarely be reached since stage 1 and stage 2 have their own caps)
-        if stats.pumpIterations > DEF_MAX_PUMP_ITER
+        if stats.pumpIterations >= DEF_MAX_PUMP_ITER
             stats.exitReason = ITER_LIMIT
             break
         end
@@ -301,8 +313,9 @@ function SCIP.find_primal_solution(
         end
 
         # Random feasibility check (skip the first iteration to save time)
-        if config.randFeasCheck && stats.pumpIterations > 1
+        if config.randFeasCheck && stats.pumpIterations > 1 && timeElapsed(heurStartTime) <= heurTimeLimit
             rrStartTime = time()
+            stats.rfcCalls += 1
             found = randFeasCheck!(scip, heur_ptr, lp, xFrac, xProbe)
             stats.rrTime += timeElapsed(rrStartTime)
 
@@ -336,6 +349,7 @@ function SCIP.find_primal_solution(
         end
 
         # Cycle / stagnation detection
+        repeatRound = false  # unitary only: xRound identical to one already submitted this stage
         if config.fwStepSize == :unitary
             h = hashRounded(xRound, st.activeIntIdx)
 
@@ -378,6 +392,10 @@ function SCIP.find_primal_solution(
                     end
                 end
             end
+
+            # Check if we visited this rounded point, either last iter or in the visitedRounded
+            # If so, we can skip the resubmit below
+            repeatRound = h == st.prevHash || h in visitedRounded
 
             st.prevHash = h
             prevRound .= xRound
@@ -430,21 +448,31 @@ function SCIP.find_primal_solution(
             println("  xRound = $(xRound[st.activeIntIdx])  (after restart)")
         end
 
-        # Try to submit the rounded solution to SCIP
-        if submitSolution(scip, heur_ptr, lpCols, xRound, ncols)
-            result = recordSolutionFound!(stats, SOLUTION_ROUND, scip, heurStartTime)
-            origObj = origObjective(scip, lpCols, xRound, ncols)
-            step = dist(xRound, prevProj)
+        # Try to submit the rounded solution to SCIP.
+        # Avoid submitting a rounding that was already submitted (and rejected) earlier this stage.
+        if !repeatRound
+            stats.roundSubmits += 1
+            if submitSolution(scip, heur_ptr, lpCols, xRound, ncols)
+                result = recordSolutionFound!(stats, SOLUTION_ROUND, scip, heurStartTime)
+                origObj = origObjective(scip, lpCols, xRound, ncols)
+                step = dist(xRound, prevProj)
 
-            logDirectAccept(config, pumpDisplay, stats, st.stage, alpha, origObj, step, heurStartTime, flips, perturbed, restarted, "feasRound", "FeasRound")
+                logDirectAccept(config, pumpDisplay, stats, st.stage, alpha, origObj, step, heurStartTime, flips, perturbed, restarted, "feasRound", "FeasRound")
 
-            break
+                break
+            end
         end
 
         # Skip diveSolve in stage 1 (only binaries are active, so diveSolve can't produce a complete MIP solution)
-        if config.useDive && st.stage == 2
-            printstyled("  [diveSolve] fixing integers to the current rounding and diving to solve for continuous values...\n", color=:yellow)
-            feasible, sol = diveSolve(scip, lpCols, intIdx, xRound, ncols)
+        if config.useDive && st.stage == 2 && timeElapsed(heurStartTime) <= heurTimeLimit
+            if config.verbose >= 2
+                printstyled("  [diveSolve] fixing integers to the current rounding and diving to solve for continuous values...\n", color=:yellow)
+            end
+            diveStartTime = time()
+            stats.diveCalls += 1
+            feasible, sol = diveSolve(scip, lpCols, intIdx, xRound, ncols,
+                                      heurTimeLimit - timeElapsed(heurStartTime))
+            stats.diveTime += timeElapsed(diveStartTime)
             if feasible
                 if submitSolution(scip, heur_ptr, lpCols, sol, ncols)
                     result = recordSolutionFound!(stats, SOLUTION_DIVE, scip, heurStartTime)
@@ -463,6 +491,11 @@ function SCIP.find_primal_solution(
         fOFP, gradOFP! = buildOFPFunctions(f, grad!, alpha, weight, lp.objCoeffs, ncols)
 
         remainingTime = heurTimeLimit - timeElapsed(heurStartTime)
+        if remainingTime <= 0
+            stats.exitReason = TIME_LIMIT
+            break
+        end
+        
         fwStartTime = time()
 
         # Bound the LMO's own LP solves to what's left of the budget, so a single slow LP can't run unbounded
@@ -505,16 +538,23 @@ function SCIP.find_primal_solution(
             break
         end
 
-        # Stagnation tracking (stagnationCount: perturb/restart; stage1NoImpr: stage-1 stall exit).
-        # Count any iteration that doesn't drop projObj by at least DEF_MIN_IMPROVEMENT relative to
-        # the value at the last reset — a slow monotonic crawl (FW not fully converging) still stalls.
+        # stagnationCount: iters without a DEF_MIN_IMPROVEMENT drop vs bestProjObj (best since the last shake).
+        # used to trigger perturb/restart
         if projObj < st.bestProjObj * (1 - DEF_MIN_IMPROVEMENT)
             st.bestProjObj = projObj
             st.stagnationCount = 0
-            st.stage == 1 && (st.stage1NoImpr = 0)
         else
             st.stagnationCount += 1
-            st.stage == 1 && (st.stage1NoImpr += 1)
+        end
+
+        # stage1NoImpr: iters without a DEF_MIN_IMPROVEMENT drop vs closestDist (stage's all-time best, survives shakes).
+        # used to force the stage 1 -> 2 transition
+        if st.stage == 1
+            if projObj < st.closestDist * (1 - DEF_MIN_IMPROVEMENT)
+                st.stage1NoImpr = 0
+            else
+                st.stage1NoImpr += 1
+            end
         end
 
         # Closest point of the stage
