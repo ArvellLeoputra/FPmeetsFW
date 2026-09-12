@@ -20,7 +20,7 @@
 #SBATCH --partition=big
 #SBATCH --constraint=Gold6338
 #SBATCH --array=1-240
-#SBATCH --time=00:10:00
+#SBATCH --time=00:25:00
 #SBATCH --mem=16G
 #SBATCH --cpus-per-task=1
 #SBATCH --output=/home/htc/aleoputra/project/FPmeetsFW/misc/slurm_logs/filter_%A_%a.out

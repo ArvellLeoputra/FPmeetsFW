@@ -208,6 +208,10 @@ end
 # CSV row (with header) to outDir/task_<taskIndex>.csv. Meant for SLURM array jobs:
 # one array task = one instance, so all instances run in parallel instead of
 # sequentially. Combine the per-task files afterward with scripts/merge_filter.sh.
+#
+# Solves the instance twice in this one process - a discarded JIT warm-up, then the
+# real, JIT-free measurement that gets written out (same pattern as clean.jl for
+# the main heuristic). Each array task's own wall time roughly doubles as a result.
 function runTask(instanceDir::String, outDir::String, rootTimeLimit::Float64, taskIndex::Int)
     files = findInstanceFiles(instanceDir)
     if taskIndex < 1 || taskIndex > length(files)
@@ -218,6 +222,10 @@ function runTask(instanceDir::String, outDir::String, rootTimeLimit::Float64, ta
 
     println("[task $taskIndex/$(length(files))] $f ...")
     flush(stdout)
+
+    # Discarded warm-up: same instance, same process, so the real solve below runs
+    # fully compiled.
+    checkInstance(path, rootTimeLimit)
 
     r = checkInstance(path, rootTimeLimit)
 
