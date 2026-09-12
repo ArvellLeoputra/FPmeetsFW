@@ -25,6 +25,9 @@ The fields can be set via a configuration file or command-line arguments.
     "probabilistically round the current LP point x as a cheap feasibility attempt;
     independent of the pump's own rounding"
     randFeasCheck::Bool = false
+    "WalkSAT perturb: when there aren't enough fractional variables to flip,
+    pull extras from the support of currently-violated LP rows"
+    walksatPerturb::Bool = true
     "warm start the active set for the Frank-Wolfe algorithm"
     fwWarmStart::Bool = false
     "use the raw SCIP-LPI LMO and seed its basis from SCIP's LP basis (vs the MOI-based LMO)"
@@ -101,6 +104,8 @@ Used for logging and reporting purposes.
     "perturbation and restart statistics"
     perturbCount::Int = 0
     restartCount::Int = 0
+    "times the WalkSAT fallback fired inside perturb"
+    walksatCount::Int = 0
 
     "solution status"
     solutionFound::Bool = false
@@ -139,6 +144,8 @@ except `stage1NoImpr`, which is a stage-1-only signal and is never reset on tran
     stage::Int
     "active integer index set"
     activeIntIdx::Vector{Int}
+    "activeIntIdx as a Set, for O(1) lookup"
+    activeIntIdxSet::Set{Int} = Set(activeIntIdx)
     "active general integer index set"
     activeGIntIdx::Vector{Int}
     "average number of variable flips per perturbation/restart"
@@ -174,18 +181,27 @@ A struct that holds the LP data for the FPFW heuristic,
 received from getLPInfo function in src/scip/queries.jl
 """
 @kwdef struct LPInfo
+    "columns and rows of the LP, as SCIP pointers"
     lpCols::Vector{Ptr{SCIP.SCIP_COL}}
     lpRows::Vector{Ptr{SCIP.SCIP_ROW}}
     "coefficient per LP column"
     objCoeffs::Vector{Float64}
     "objective function scale (euclidean norm of objCoeffs)"
     objScale::Float64
+    "column index dictionary: SCIP column pointer -> index in lpCols"
     colDict::Dict{Ptr{SCIP.SCIP_COL}, Int}
+    "indices of binary variables"
     binIdx::Vector{Int}
+    "binIdx as a Set, for O(1) membership tests"
+    binSet::Set{Int}
+    "indices of general integer variables"
     gIntIdx::Vector{Int}
+    "indices of all integer variables"
     intIdx::Vector{Int}
+    "number of columns and rows in the LP"
     ncols::Int32
     nrows::Int32
+    "initial solution vector (LP-feasible)"
     initSol::Vector{Float64}
 end
 
@@ -200,6 +216,13 @@ A struct that holds the runtime data for a run of the FPFW heuristic.
     lmo::Union{Nothing, FrankWolfe.MathOptLMO, LPILMO} = nothing
     "run statistics, filled during the run and read out afterwards for reporting"
     stats::FPFWStats = FPFWStats()
+    "restart's general-integer flip budget: escalates across consecutive restarts, decays
+    geometrically per iteration without one, capped at gIntFlipBudgetCap"
+    gIntFlipBudget::Int = 0
+    "pumpIterations value as of the last restart, used to compute the geometric decay above"
+    lastRestart::Int = 0
+    "cap on gIntFlipBudget, set once from the problem's general-integer count"
+    gIntFlipBudgetCap::Int = 0
     "MOI-path only: per general-integer, the two |x - xRound| constraint handles, rewritten each
     iteration with the current rounding target. The LPI path needs no equivalent — LPIupdateRounding!
     addresses the aux rows by their integer position (appended after the original nrows rows) instead."

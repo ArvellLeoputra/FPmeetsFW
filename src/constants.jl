@@ -18,6 +18,8 @@ const DEF_MAX_PERTURBS = 10        # Cumulative perturbs in current stage before
 const DEF_AVG_FLIPS = 20           # Fixed perturbation flip count
 const DEF_BIGM = 1e9               # Big M constant for cycle-breaking perturbations
 const DEF_BIGBIGM = 1e15           # Bigbig M constant for perturbations
+const DEF_GEOM_FACTOR = 0.85       # Geometric decay applied to the general-integer restart flip count per iteration without a restart
+const DEF_MIN_GINT_FLIP_CAP = 10   # Floor for the restart flip-count cap
 
 # Objective Feasibility Pump parameters
 const DEF_ALPHA = 0.0  # initial objective weight

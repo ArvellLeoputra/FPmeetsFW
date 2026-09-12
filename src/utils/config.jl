@@ -31,6 +31,7 @@ function buildFPFWConfig(params::Dict{String, String})
         "alphaFactor",
         "randomizedRounding",
         "randomFeasibilityCheck",
+        "walksatPerturb",
         "fwWarmStart",
         "lmoWarmStart",
         "useDive",
@@ -55,6 +56,7 @@ function buildFPFWConfig(params::Dict{String, String})
     alphaFactor = parse(Float64, params["alphaFactor"])
     randRound = parse(Bool, params["randomizedRounding"])
     randFeasCheck = parse(Bool, params["randomFeasibilityCheck"])
+    walksatPerturb = parse(Bool, params["walksatPerturb"])
     fwWarmStart = parse(Bool, params["fwWarmStart"])
     lmoWarmStart = parse(Bool, params["lmoWarmStart"])
     useDive = parse(Bool, params["useDive"])
@@ -111,6 +113,7 @@ function buildFPFWConfig(params::Dict{String, String})
         alphaFactor = alphaFactor,
         randRound = randRound,
         randFeasCheck = randFeasCheck,
+        walksatPerturb = walksatPerturb,
         fwWarmStart = fwWarmStart,
         lmoWarmStart = lmoWarmStart,
         useDive = useDive,

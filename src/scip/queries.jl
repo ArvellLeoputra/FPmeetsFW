@@ -28,10 +28,12 @@ function getLPInfo(scip::Ptr{SCIP.SCIP_})
         initSol[j] = SCIP.SCIPcolGetPrimsol(lpCols[j])
     end
 
+    binSet = Set(binIdx)
+    intIdx = [binIdx; gIntIdx]
     objScale = sqrt(sum(abs2, objCoeffs))
 
-    return LPInfo(; lpCols, lpRows, objCoeffs, objScale, colDict, binIdx, gIntIdx,
-                  intIdx = [binIdx; gIntIdx], ncols, nrows, initSol)
+    return LPInfo(; lpCols, lpRows, objCoeffs, objScale, colDict, binIdx,
+                  binSet, gIntIdx, intIdx, ncols, nrows, initSol)
 end
 
 function origObjective(scip::Ptr{SCIP.SCIP_}, lpCols::Vector{Ptr{SCIP.SCIP_COL}}, sol::Vector{Float64}, ncols::Int32)
@@ -72,6 +74,8 @@ function isSolutionLPFeasible(
         end
     end
 
+    inf = SCIP.SCIPinfinity(scip)
+
     # Constraint check using rows
     for i in 1:length(lpRows)
         row = lpRows[i]
@@ -81,22 +85,18 @@ function isSolutionLPFeasible(
         nonzVals = unsafe_wrap(Vector{SCIP.SCIP_Real}, SCIP.SCIProwGetVals(row), nnonz)
 
         activity = 0.0
-
         for k in 1:nnonz
-            col = nonzCols[k]
-            idx = colDict[col]
-            activity += nonzVals[k] * sol[idx]
+            activity += nonzVals[k] * sol[colDict[nonzCols[k]]]
         end
 
         constant = SCIP.SCIProwGetConstant(row)
         lhs = SCIP.SCIProwGetLhs(row) - constant
         rhs = SCIP.SCIProwGetRhs(row) - constant
+        
+        belowLhs = lhs > -inf && SCIP.SCIPisFeasLT(scip, activity, lhs) == SCIP.TRUE
+        aboveRhs = rhs < inf && SCIP.SCIPisFeasGT(scip, activity, rhs) == SCIP.TRUE
 
-        if lhs > -SCIP.SCIPinfinity(scip) && SCIP.SCIPisFeasLT(scip, activity, lhs) == SCIP.TRUE
-            return false
-        end
-
-        if rhs < SCIP.SCIPinfinity(scip) && SCIP.SCIPisFeasGT(scip, activity, rhs) == SCIP.TRUE
+        if belowLhs || aboveRhs
             return false
         end
     end

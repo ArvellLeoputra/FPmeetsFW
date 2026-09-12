@@ -1,5 +1,5 @@
-# Build (or rebuild) the LMO from the current LP and seed its basis
-# Used both for the initial build and for the stage-1 -> stage-2 rebuild (freeOld frees the old LPI first)
+# Build the LMO: raw SCIP-LPI (lmoWarmStart) or MOI-based, seeding the LPI one's basis if optimal.
+# Rebuilt at the stage-1 -> stage-2 transition too, since manhattan's aux rows are sized by activeGIntIdx.
 function setupLMO!(
     scip::Ptr{SCIP.SCIP_},
     data::FPFWRunData,
@@ -17,10 +17,10 @@ function setupLMO!(
         end
 
         data.lmo = buildLPILMO(scip, lp.lpCols, lp.lpRows, lp.colDict, activeGIntIdx, config.norm, stage, lp.ncols, lp.nrows, config.verbose)
-        newLpiRef = Ref{Ptr{SCIP.SCIP_LPI}}(C_NULL)
-        SCIP.@SCIP_CALL SCIP.SCIPgetLPI(scip, newLpiRef)
+        scipLpiRef = Ref{Ptr{SCIP.SCIP_LPI}}(C_NULL)
+        SCIP.@SCIP_CALL SCIP.SCIPgetLPI(scip, scipLpiRef)
 
-        if SCIP.SCIPlpiIsOptimal(newLpiRef[]) == SCIP.TRUE
+        if SCIP.SCIPlpiIsOptimal(scipLpiRef[]) == SCIP.TRUE
             LPIinitBase(scip, data.lmo, lp.ncols, lp.nrows)
         end
     else
@@ -62,6 +62,7 @@ function transitionToStage2!(
     st.stageIter = 0
     st.activeGIntIdx = lp.gIntIdx
     st.activeIntIdx = lp.intIdx
+    st.activeIntIdxSet = Set(lp.intIdx)
     st.avgFlips = min(DEF_AVG_FLIPS, length(lp.intIdx))
 
     setupLMO!(scip, data, config, lp, st.activeGIntIdx, st.stage; freeOld=true)
@@ -215,6 +216,7 @@ function SCIP.find_primal_solution(
     # Get LP data
     lp = getLPInfo(scip)
     (; lpCols, lpRows, colDict, binIdx, gIntIdx, intIdx, ncols, nrows, initSol) = lp
+    data.gIntFlipBudgetCap = max(length(gIntIdx) ÷ 10, DEF_MIN_GINT_FLIP_CAP)
 
     data.called += 1
 
@@ -364,7 +366,8 @@ function SCIP.find_primal_solution(
                 doRestart = cycled || st.consecutivePerturbs >= DEF_MAX_PERTURBS
 
                 if !doRestart
-                    flips = perturb(scip, xRound, xFrac, binIdx, st.activeIntIdx, st.avgFlips, config.verbose >= 2)
+                    flips, walksatFired = perturb(scip, xRound, xFrac, lp, st, config)
+                    walksatFired && (stats.walksatCount += 1)
                     perturbed = flips > 0
                     if perturbed
                         stats.perturbCount += 1
@@ -380,7 +383,7 @@ function SCIP.find_primal_solution(
                 end
 
                 if doRestart
-                    flips = restart(scip, xRound, xFrac, prevRound, binIdx, st.activeGIntIdx, lpCols, st.avgFlips, config.verbose >= 2)
+                    flips = restart(scip, xRound, xFrac, prevRound, lp, st, config, data)
                     restarted = flips > 0
                     if restarted
                         stats.restartCount += 1
@@ -407,7 +410,8 @@ function SCIP.find_primal_solution(
                 # consecutivePerturbs: perturbs since the last restart (or stage start)
                 if st.consecutivePerturbs < DEF_MAX_PERTURBS
                     st.consecutivePerturbs += 1
-                    flips = perturb(scip, xRound, xFrac, binIdx, st.activeIntIdx, st.avgFlips, config.verbose >= 2)
+                    flips, walksatFired = perturb(scip, xRound, xFrac, lp, st, config)
+                    walksatFired && (stats.walksatCount += 1)
                     perturbed = flips > 0
                     if perturbed
                         stats.perturbCount += 1
@@ -417,7 +421,7 @@ function SCIP.find_primal_solution(
                     end
 
                 else  # escalate to a restart once consecutivePerturbs reaches DEF_MAX_PERTURBS
-                    flips = restart(scip, xRound, xFrac, prevRound, binIdx, st.activeGIntIdx, lpCols, st.avgFlips, config.verbose >= 2)
+                    flips = restart(scip, xRound, xFrac, prevRound, lp, st, config, data)
                     restarted = flips > 0
                     if restarted
                         stats.restartCount += 1

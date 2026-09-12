@@ -76,7 +76,7 @@ function printRunInfo(scip::SCIP.SCIPData, config::FPFWConfig)
     println("binaryVars = $binCount")
     println("integerVars = $intCount")
     println("continuousVars = $contCount")
-    println("readTime = $(round(SCIP.SCIPgetReadingTime(scip); digits=2))s")
+    println("readTime = $(round(SCIP.SCIPgetReadingTime(scip); digits=4))s")
 end
 
 function printConfigs(config::FPFWConfig)
@@ -134,15 +134,15 @@ function printResults(stats::FPFWStats)
     println("gap = $gapStr")
     println("primalIntegral = $(round(stats.primalIntegral, digits=4))")
     println("solFound = $(stats.solutionFound)")
-    println("totalTime = $(round(stats.totalTime, digits=2))s")
-    println("rootTime = $(round(stats.rootTime, digits=2))s")
+    println("totalTime = $(round(stats.totalTime, digits=4))s")
+    println("rootTime = $(round(stats.rootTime, digits=4))s")
 
     if !startswith(string(stats.exitReason), "SCIP_")
-        println("heurTime = $(round(stats.heurTime, digits=2))s")
-        println("fwTime = $(round(stats.fwTime, digits=2))s")
-        println("randRoundTime = $(round(stats.rrTime, digits=2))s")
-        println("diveTime = $(round(stats.diveTime, digits=2))s")
-        println("setupTime = $(round(stats.setupTime, digits=2))s")
+        println("heurTime = $(round(stats.heurTime, digits=4))s")
+        println("lmoSetupTime = $(round(stats.setupTime, digits=4))s")
+        println("fwTime = $(round(stats.fwTime, digits=4))s")
+        println("randRoundTime = $(round(stats.rrTime, digits=4))s")
+        println("diveTime = $(round(stats.diveTime, digits=4))s")
         println("pumpIterations = $(stats.pumpIterations)")
         println("rfcCalls = $(stats.rfcCalls)")
         println("diveCalls = $(stats.diveCalls)")
@@ -150,6 +150,7 @@ function printResults(stats::FPFWStats)
         println("fwIterations = $(stats.fwIterations)")
         println("perturbCount = $(stats.perturbCount)")
         println("restartCount = $(stats.restartCount)")
+        println("walksatCount = $(stats.walksatCount)")
     end
 
     println("exitReason = $exitMsg")
@@ -180,6 +181,7 @@ function writeResults(stats::FPFWStats, config::FPFWConfig, fileName::String, re
         "fwIterations" => stats.fwIterations,
         "perturbCount" => stats.perturbCount,
         "restartCount" => stats.restartCount,
+        "walksatCount" => stats.walksatCount,
         "exitReason" => string(stats.exitReason),
     )
 
