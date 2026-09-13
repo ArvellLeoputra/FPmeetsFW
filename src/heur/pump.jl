@@ -17,7 +17,7 @@ function roundSolution!(
     x::Vector{Float64},
     intIdx::Vector{Int},
     randRound::Bool
-)
+)::Nothing
     xRound .= x  # refresh continuous/inactive-stage entries from the current LP solution
     threshold = getRoundingThreshold(randRound)
     for i in intIdx
@@ -74,14 +74,14 @@ function infeasibleSupport(
 end
 
 # Flip a single perturbation candidate
-function flipVariable!(
+function flipRounded!(
     scip::Ptr{SCIP.SCIP_},
     xRound::Vector{Float64},
     x::Vector{Float64},
     i::Int,
     binSet::Set{Int},
     lpCols::Vector{Ptr{SCIP.SCIP_COL}}
-)
+)::Nothing
     if i in binSet
         xRound[i] = 1.0 - xRound[i]
         return
@@ -116,10 +116,9 @@ function perturb(
     lp::LPInfo,
     st::StageState,
     config::FPFWConfig,
-)::Tuple{Int, Bool}
+)::Tuple{Int, Int}
     activeIntIdx = st.activeIntIdx
     nFlips = trunc(Int, st.avgFlips * (rand() + 0.5))
-    walksatFired = false
 
     # Identify the fractional variables in the current rounded solution
     fracVars = Tuple{Float64, Int}[]
@@ -131,61 +130,65 @@ function perturb(
     end
 
     if isempty(fracVars) && !config.walksatPerturb
-        return 0, walksatFired
+        return 0, 0
     end
 
     # Sort the fractional variables by their distance from the LP solution, descending
+    # MergeSort is used due to stability, so equal distances keep ascending-index order
     sort!(fracVars, alg=MergeSort, by=first, rev=true)
 
+    # Calculate number of fractional variables to flip
     if isempty(fracVars)
         nFracFlips = 0
     else
         nFracFlips = clamp(nFlips, 1, length(fracVars))
     end
 
-    selected = fracVars[1:nFracFlips]
-
-    # WalkSAT perturbation: if too few fractional variables to reach nFlips,
-    # fill selected with the support of the LP rows that xRound currently violates
+    # WalkSAT perturbation: if there are too few fractional variables to reach flip target (nFlips),
+    # fill the flip set with  a random subset of the integer variables appearing in violated constraints.
+    varsToFlip = fracVars[1:nFracFlips]
     if config.walksatPerturb && nFracFlips < nFlips
-        walksatFired = true
         nNeeded = nFlips - nFracFlips
         eligible = st.activeIntIdxSet  # cached, run/stage-invariant - never mutated by infeasibleSupport
 
         # Get the support of infeasible constraints
         supp = infeasibleSupport(scip, lp.lpRows, xRound, lp.colDict, eligible)
-        for (_, i) in selected
+        for (_, i) in varsToFlip
             delete!(supp, i)  # delete if already in the selected vars
         end
 
         xsupp = collect(supp)  # convert to array for shuffling
-        # TODO: consider weighting the support by the degree of violation of each constraint,
-        # so that more violated constraints are more likely to be selected
+        # TODO:  weight shuffle the variables, the more the variables appear inside violated constraints, the "hopefully" better it is to perturb this
         shuffle!(MersenneTwister(config.seed), xsupp)  # MersenneTwister for reproducibility
         for i in xsupp[1:min(nNeeded, length(xsupp))]
-            push!(selected, (0.0, i))
+            push!(varsToFlip, (0.0, i))
         end
     end
 
-    if isempty(selected)
-        return 0, walksatFired
+    if isempty(varsToFlip)
+        return 0, 0
     end
 
+    nWalksat = length(varsToFlip) - nFracFlips
+
     if config.verbose >= 2
-        nWalksat = length(selected) - nFracFlips
-        println("Perturbing $(length(selected)) integer variables: $nFracFlips fractional, $nWalksat WalkSAT (out of $(length(fracVars)) fractional variables available)")
+        println("Perturbing $(length(varsToFlip)) integer variables: $nFracFlips fractional, $nWalksat WalkSAT (out of $(length(fracVars)) fractional variables available)")
     end
 
     # Flip the selected variables
-    for (_, i) in selected
-        flipVariable!(scip, xRound, x, i, lp.binSet, lp.lpCols)
+    for (_, i) in varsToFlip
+        flipRounded!(scip, xRound, x, i, lp.binSet, lp.lpCols)
     end
 
-    return length(selected), walksatFired
+    return length(varsToFlip), nWalksat
 end
 
 # Randomize a single general integer within its domain, biased away from its current value once near a bound
-function randomizeGeneralInt!(xRound::Vector{Float64}, i::Int, lpCols::Vector{Ptr{SCIP.SCIP_COL}})
+function randomizeGeneralInt!(
+    xRound::Vector{Float64},
+    i::Int,
+    lpCols::Vector{Ptr{SCIP.SCIP_COL}}
+)::Nothing
     var = SCIP.SCIPcolGetVar(lpCols[i])
     lb = SCIP.SCIPvarGetLbLocal(var)
     ub = SCIP.SCIPvarGetUbLocal(var)
@@ -213,7 +216,7 @@ function restart(
     st::StageState,
     config::FPFWConfig,
     data::FPFWRunData,
-)
+)::Int
     activeGIntIdx = st.activeGIntIdx
     avgFlips = st.avgFlips
     changed = 0
@@ -222,8 +225,8 @@ function restart(
     for i in lp.binIdx
         r = rand() - 0.47  # [-0.47, 0.53)
         if r > 0 && SCIP.SCIPisFeasEQ(scip, xRound[i], prevRound[i]) == SCIP.TRUE  # stuck variable
-            sigma = abs(xRound[i] - x[i])
-            if sigma + r > 0.5
+            roundDist = abs(xRound[i] - x[i])
+            if roundDist + r > 0.5
                 xRound[i] = 1.0 - xRound[i]
                 changed += 1
             end

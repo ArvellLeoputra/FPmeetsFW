@@ -85,10 +85,14 @@ function printConfigs(config::FPFWConfig)
     println("fwVariant = $(config.fwVariant)")
     println("fwMaxIterations = $(config.fwMaxIterations)")
     println("fwStepSize = $(config.fwStepSize)")
+    if config.fwStepSize == :fixed
+        println("fixedStepSize = $(config.fixedStepSize)")
+    end
     println("timeLimit = $(config.timeLimit)")
     println("alpha = $(config.alpha)")
     println("alphaFactor = $(config.alphaFactor)")
     println("randomizedRounding = $(config.randRound ? "enabled" : "disabled")")
+    println("walksatPerturb = $(config.walksatPerturb ? "enabled" : "disabled")")
     println("randomizedFeasibilityCheck = $(config.randFeasCheck ? "enabled" : "disabled")")
     println("fwWarmStart = $(config.fwWarmStart ? "enabled" : "disabled")")
     println("lmoWarmStart = $(config.lmoWarmStart ? "enabled" : "disabled")")
@@ -139,7 +143,7 @@ function printResults(stats::FPFWStats)
 
     if !startswith(string(stats.exitReason), "SCIP_")
         println("heurTime = $(round(stats.heurTime, digits=4))s")
-        println("lmoSetupTime = $(round(stats.setupTime, digits=4))s")
+        println("lmoSetupTime = $(round(stats.lmoSetupTime, digits=4))s")
         println("fwTime = $(round(stats.fwTime, digits=4))s")
         println("randRoundTime = $(round(stats.rrTime, digits=4))s")
         println("diveTime = $(round(stats.diveTime, digits=4))s")
@@ -173,7 +177,7 @@ function writeResults(stats::FPFWStats, config::FPFWConfig, fileName::String, re
         "fwTime" => stats.fwTime,
         "randRoundTime" => stats.rrTime,
         "diveTime" => stats.diveTime,
-        "setupTime" => stats.setupTime,
+        "lmoSetupTime" => stats.lmoSetupTime,
         "rfcCalls" => stats.rfcCalls,
         "diveCalls" => stats.diveCalls,
         "roundSubmits" => stats.roundSubmits,

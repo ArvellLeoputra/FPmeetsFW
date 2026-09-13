@@ -125,9 +125,11 @@ function buildOFPFunctions(
     return fOFP, gradOFP!
 end
 
-function buildLineSearch(fwStepSize::Symbol)
+function buildLineSearch(fwStepSize::Symbol, fixedStepSize::Float64=1.0)
     if fwStepSize == :unitary
         FrankWolfe.FixedStep(1.0)
+    elseif fwStepSize == :fixed
+        FrankWolfe.FixedStep(fixedStepSize)
     elseif fwStepSize == :agnostic
         FrankWolfe.Agnostic()
     elseif fwStepSize == :backtracking
@@ -137,7 +139,7 @@ function buildLineSearch(fwStepSize::Symbol)
     elseif fwStepSize == :adaptive
         FrankWolfe.Adaptive()
     else
-        error("Unknown line search: $fwStepSize. Choose from :unitary, :agnostic, :backtracking, :secant, :adaptive")
+        error("Unknown line search: $fwStepSize. Choose from :unitary, :fixed, :agnostic, :backtracking, :secant, :adaptive")
     end
 end
 

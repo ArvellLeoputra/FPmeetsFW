@@ -26,7 +26,7 @@ function setupLMO!(
     else
         data.lmo, data.auxConstraintRefs = SCIPbuildLMO(scip, lp.lpCols, lp.lpRows, lp.colDict, activeGIntIdx, config.norm, lp.ncols, lp.nrows)
     end
-    data.stats.setupTime += timeElapsed(setupStart)
+    data.stats.lmoSetupTime += timeElapsed(setupStart)
 end
 
 # Check if stage 1 is complete
@@ -135,7 +135,7 @@ function fwProject(
     remainingTime::Float64
 )
     # Rebuilt each call so stateful line searches (e.g. Adaptive) reset per FW solve
-    ls = buildLineSearch(config.fwStepSize)
+    ls = buildLineSearch(config.fwStepSize, config.fixedStepSize)
 
     if config.norm == :manhattan
         # Manhattan start: xFrac plus one aux per general integer, set to |xFrac - xRound| (a feasible start)
@@ -366,11 +366,13 @@ function SCIP.find_primal_solution(
                 doRestart = cycled || st.consecutivePerturbs >= DEF_MAX_PERTURBS
 
                 if !doRestart
-                    flips, walksatFired = perturb(scip, xRound, xFrac, lp, st, config)
-                    walksatFired && (stats.walksatCount += 1)
+                    flips, nWalksat = perturb(scip, xRound, xFrac, lp, st, config)
                     perturbed = flips > 0
                     if perturbed
                         stats.perturbCount += 1
+                        if nWalksat > 0
+                            stats.walksatCount += 1
+                        end
                         st.consecutivePerturbs += 1
                         st.stagnationCount = 0
                         st.bestProjObj = Inf
@@ -383,15 +385,22 @@ function SCIP.find_primal_solution(
                 end
 
                 if doRestart
-                    flips = restart(scip, xRound, xFrac, prevRound, lp, st, config, data)
-                    restarted = flips > 0
+                    for _ in 1:DEF_MAX_RES_RETRIES
+                        flips = restart(scip, xRound, xFrac, prevRound, lp, st, config, data)
+                        if flips > 0
+                            stats.restartCount += 1
+                            restarted = true
+                        end
+                        h = hashRounded(xRound, st.activeIntIdx)  # rehash after restart
+                        if !(h == st.prevHash || h in visitedRounded)
+                            break
+                        end
+                    end
+
                     if restarted
-                        stats.restartCount += 1
                         st.consecutivePerturbs = 0
                         st.stagnationCount = 0
                         st.bestProjObj = Inf
-                        h = hashRounded(xRound, st.activeIntIdx)  # rehash after restart
-                        empty!(visitedRounded)  # clear the visited set after a restart
                     end
                 end
             end
@@ -410,8 +419,10 @@ function SCIP.find_primal_solution(
                 # consecutivePerturbs: perturbs since the last restart (or stage start)
                 if st.consecutivePerturbs < DEF_MAX_PERTURBS
                     st.consecutivePerturbs += 1
-                    flips, walksatFired = perturb(scip, xRound, xFrac, lp, st, config)
-                    walksatFired && (stats.walksatCount += 1)
+                    flips, nWalksat = perturb(scip, xRound, xFrac, lp, st, config)
+                    if nWalksat > 0
+                        stats.walksatCount += 1
+                    end
                     perturbed = flips > 0
                     if perturbed
                         stats.perturbCount += 1

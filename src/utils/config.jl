@@ -1,7 +1,7 @@
 # Valid options for FPFWConfig fields
 const VALID_NORMS = (:euclidean, :manhattan, :smoothManhattan)
 const VALID_FW_VARIANTS = (:vanilla, :away, :blended_pairwise, :blended)
-const VALID_FW_STEP_SIZES = (:agnostic, :backtracking, :secant, :adaptive, :unitary)
+const VALID_FW_STEP_SIZES = (:agnostic, :backtracking, :secant, :adaptive, :unitary, :fixed)
 
 function parseCfgFile(path::String)
     if !isfile(path)
@@ -51,6 +51,7 @@ function buildFPFWConfig(params::Dict{String, String})
     fwVariant = Symbol(params["fwVariant"])
     fwMaxIterations = parse(Int, params["fwMaxIterations"])
     fwStepSize = Symbol(params["fwStepSize"])
+    fixedStepSize = parse(Float64, get(params, "fixedStepSize", "0.5"))
     timeLimit = parse(Float64, params["timeLimit"])
     alpha = parse(Float64, params["alpha"])
     alphaFactor = parse(Float64, params["alphaFactor"])
@@ -82,7 +83,11 @@ function buildFPFWConfig(params::Dict{String, String})
 
     # Avoid manhattan norm with step sizes that require a smooth objective
     if norm == :manhattan && fwStepSize ∈ (:adaptive, :secant, :backtracking)
-        error("manhattan norm requires a smooth objective — use agnostic or unitary instead")
+        error("manhattan norm requires a smooth objective — use agnostic, unitary, or fixed instead")
+    end
+
+    if fwStepSize == :fixed && (fixedStepSize <= 0.0 || fixedStepSize > 1.0)
+        error("Invalid fixedStepSize: $fixedStepSize. Must be in (0, 1]")
     end
 
     # Avoid warm-starting the active set for manhattan norm
@@ -108,6 +113,7 @@ function buildFPFWConfig(params::Dict{String, String})
         fwVariant = fwVariant,
         fwMaxIterations = fwMaxIterations,
         fwStepSize = fwStepSize,
+        fixedStepSize = fixedStepSize,
         timeLimit = timeLimit,
         alpha = alpha,
         alphaFactor = alphaFactor,

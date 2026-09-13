@@ -14,6 +14,9 @@ The fields can be set via a configuration file or command-line arguments.
     fwMaxIterations::Int = 1
     "step size strategy for the Frank-Wolfe algorithm"
     fwStepSize::Symbol = :unitary
+    "constant step size gamma used only when fwStepSize == :fixed (curvature-free, so
+    safe with a non-smooth norm like manhattan, unlike :adaptive/:secant/:backtracking)"
+    fixedStepSize::Float64 = 0.5
     "time budget in seconds for the FPFW heuristic only"
     timeLimit::Float64 = 300.0
     "objective weight for objective feasibility pump"
@@ -89,7 +92,7 @@ Used for logging and reporting purposes.
     rrTime::Float64 = 0.0
     fwTime::Float64 = 0.0
     diveTime::Float64 = 0.0
-    setupTime::Float64 = 0.0
+    lmoSetupTime::Float64 = 0.0
 
     "iteration statistics"
     pumpIterations::Int = 0

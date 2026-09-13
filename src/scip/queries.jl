@@ -77,9 +77,7 @@ function isSolutionLPFeasible(
     inf = SCIP.SCIPinfinity(scip)
 
     # Constraint check using rows
-    for i in 1:length(lpRows)
-        row = lpRows[i]
-
+    for row in lpRows
         nnonz = SCIP.SCIProwGetNNonz(row)
         nonzCols = unsafe_wrap(Vector{Ptr{SCIP.SCIP_COL}}, SCIP.SCIProwGetCols(row), nnonz)
         nonzVals = unsafe_wrap(Vector{SCIP.SCIP_Real}, SCIP.SCIProwGetVals(row), nnonz)
