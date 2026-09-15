@@ -140,8 +140,10 @@ function printResults(stats::FPFWStats)
     println("solFound = $(stats.solutionFound)")
     println("totalTime = $(round(stats.totalTime, digits=4))s")
     println("rootTime = $(round(stats.rootTime, digits=4))s")
+    println("exitReason = $exitMsg")
 
     if !startswith(string(stats.exitReason), "SCIP_")
+        printstyled("[pump stats]\n", color=:cyan)
         println("heurTime = $(round(stats.heurTime, digits=4))s")
         println("lmoSetupTime = $(round(stats.lmoSetupTime, digits=4))s")
         println("fwTime = $(round(stats.fwTime, digits=4))s")
@@ -155,9 +157,8 @@ function printResults(stats::FPFWStats)
         println("perturbCount = $(stats.perturbCount)")
         println("restartCount = $(stats.restartCount)")
         println("walksatCount = $(stats.walksatCount)")
+        println("firstPerturbation = $(stats.firstPerturbation)")
     end
-
-    println("exitReason = $exitMsg")
 end
 
 function writeResults(stats::FPFWStats, config::FPFWConfig, fileName::String, resultsDir::String)
@@ -186,6 +187,7 @@ function writeResults(stats::FPFWStats, config::FPFWConfig, fileName::String, re
         "perturbCount" => stats.perturbCount,
         "restartCount" => stats.restartCount,
         "walksatCount" => stats.walksatCount,
+        "firstPerturbation" => stats.firstPerturbation,
         "exitReason" => string(stats.exitReason),
     )
 

@@ -109,6 +109,8 @@ Used for logging and reporting purposes.
     restartCount::Int = 0
     "times the WalkSAT fallback fired inside perturb"
     walksatCount::Int = 0
+    "pump iteration at the first successful perturb, 0 if none occurred"
+    firstPerturbation::Int = 0
 
     "solution status"
     solutionFound::Bool = false

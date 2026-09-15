@@ -81,7 +81,7 @@ function flipRounded!(
     i::Int,
     binSet::Set{Int},
     lpCols::Vector{Ptr{SCIP.SCIP_COL}}
-)::Nothing
+)
     if i in binSet
         xRound[i] = 1.0 - xRound[i]
         return
@@ -153,7 +153,7 @@ function perturb(
 
         # Get the support of infeasible constraints
         supp = infeasibleSupport(scip, lp.lpRows, xRound, lp.colDict, eligible)
-        for (_, i) in varsToFlip
+        for (_, i) in fracVars
             delete!(supp, i)  # delete if already in the selected vars
         end
 
@@ -188,7 +188,7 @@ function randomizeGeneralInt!(
     xRound::Vector{Float64},
     i::Int,
     lpCols::Vector{Ptr{SCIP.SCIP_COL}}
-)::Nothing
+)
     var = SCIP.SCIPcolGetVar(lpCols[i])
     lb = SCIP.SCIPvarGetLbLocal(var)
     ub = SCIP.SCIPvarGetUbLocal(var)

@@ -370,6 +370,9 @@ function SCIP.find_primal_solution(
                     perturbed = flips > 0
                     if perturbed
                         stats.perturbCount += 1
+                        if stats.firstPerturbation == 0
+                            stats.firstPerturbation = stats.pumpIterations
+                        end
                         if nWalksat > 0
                             stats.walksatCount += 1
                         end
@@ -426,6 +429,9 @@ function SCIP.find_primal_solution(
                     perturbed = flips > 0
                     if perturbed
                         stats.perturbCount += 1
+                        if stats.firstPerturbation == 0
+                            stats.firstPerturbation = stats.pumpIterations
+                        end
                         # Reset counters
                         st.stagnationCount = 0
                         st.bestProjObj = Inf

@@ -32,6 +32,9 @@ struct RootSolve
     nCont::Int32
     status::Symbol       # :optimal, :infeasible, :unbounded, :nodelimit, :timelimit, :unknown
     rootTime::Float64
+    nRootLPIters::Int64
+    presolTime::Float64
+    solveTime::Float64
 end
 
 struct InstanceReport
@@ -42,6 +45,9 @@ struct InstanceReport
     nCont::Int32
     status::Symbol
     rootTime::Float64
+    nRootLPIters::Int64
+    presolTime::Float64
+    solveTime::Float64
     exclude::Bool
     reason::String
 end
@@ -63,9 +69,8 @@ function classifyStatus(scip::SCIP.SCIPData)
     end
 end
 
-# Reads filePath fresh and solves ONLY the root node (node_limit=1) with all
-# heuristics, cuts, and separators disabled (minimal_setup), either with or
-# without presolve.
+# Reads filePath fresh and solves ONLY the root node with all heuristics,
+# cuts, and separators disabled, either with or without presolve.
 function solveRoot(filePath::String, rootTimeLimit::Float64, presolve::Bool)::RootSolve
     # Clock starts before model setup/file read, matching runner.jl's globalStartTime
     # placement, so rootTime here is measured over the same window the real FPFW run's
@@ -84,7 +89,7 @@ function solveRoot(filePath::String, rootTimeLimit::Float64, presolve::Bool)::Ro
     end
 
     if !readOk
-        return RootSolve(false, Int32(0), Int32(0), Int32(0), Int32(0), :unknown, 0.0)
+        return RootSolve(false, Int32(0), Int32(0), Int32(0), Int32(0), :unknown, 0.0, Int64(0), 0.0, 0.0)
     end
 
     nVars = SCIP.SCIPgetNOrigVars(scip)
@@ -97,7 +102,13 @@ function solveRoot(filePath::String, rootTimeLimit::Float64, presolve::Bool)::Ro
 
     status = classifyStatus(scip)
 
-    return RootSolve(true, nVars, nBin, nInt, nCont, status, rootTime)
+    # nRootLPIters is a hardware-independent work count; 
+    # presolTime/solveTime are SCIP's own clocks, excluding read/setup overhead
+    nRootLPIters = SCIP.SCIPgetNRootLPIterations(scip)
+    presolTime = SCIP.SCIPgetPresolvingTime(scip)
+    solveTime = SCIP.SCIPgetSolvingTime(scip)
+
+    return RootSolve(true, nVars, nBin, nInt, nCont, status, rootTime, nRootLPIters, presolTime, solveTime)
 end
 
 function checkInstance(filePath::String, rootTimeLimit::Float64)::InstanceReport
@@ -107,7 +118,7 @@ function checkInstance(filePath::String, rootTimeLimit::Float64)::InstanceReport
 
     if !r.readOk
         return InstanceReport(name, Int32(0), Int32(0), Int32(0), Int32(0),
-            :unknown, 0.0, true, "failed to read")
+            :unknown, 0.0, Int64(0), 0.0, 0.0, true, "failed to read")
     end
 
     exclude = false
@@ -128,9 +139,14 @@ function checkInstance(filePath::String, rootTimeLimit::Float64)::InstanceReport
     elseif r.status == :timelimit
         exclude = true
         reason = "root LP/presolve did not finish within rootTimeLimit=$(rootTimeLimit)s"
+    elseif r.rootTime > rootTimeLimit
+        # rootTime includes read+setup+solve time, while SCIP's own solveTime/presolTime clocks do not
+        exclude = true
+        reason = "total root-check time (read+setup+solve = $(round(r.rootTime, digits=1))s) exceeded rootTimeLimit=$(rootTimeLimit)s"
     end
 
-    return InstanceReport(name, r.nVars, r.nBin, r.nInt, r.nCont, r.status, r.rootTime, exclude, reason)
+    return InstanceReport(name, r.nVars, r.nBin, r.nInt, r.nCont, r.status, r.rootTime,
+        r.nRootLPIters, r.presolTime, r.solveTime, exclude, reason)
 end
 
 function findInstanceFiles(instanceDir::String)
@@ -160,7 +176,7 @@ function run(instanceDir::String, outCsv::String, rootTimeLimit::Float64)
 
     open(outCsv, fileMode) do io
         if fileMode == "w"
-            println(io, "name,nVars,nBin,nInt,nCont,status,rootTime,exclude,reason")
+            println(io, "name,nVars,nBin,nInt,nCont,status,rootTime,nRootLPIters,presolTime,solveTime,exclude,reason")
             flush(io)
         end
 
@@ -175,13 +191,13 @@ function run(instanceDir::String, outCsv::String, rootTimeLimit::Float64)
             println(r.exclude ? "EXCLUDE ($(r.reason))" : "keep")
             flush(stdout)
 
-            println(io, "$(r.name),$(r.nVars),$(r.nBin),$(r.nInt),$(r.nCont),$(r.status),$(round(r.rootTime,digits=3)),$(r.exclude),\"$(r.reason)\"")
+            println(io, "$(r.name),$(r.nVars),$(r.nBin),$(r.nInt),$(r.nCont),$(r.status),$(round(r.rootTime,digits=3)),$(r.nRootLPIters),$(round(r.presolTime,digits=3)),$(round(r.solveTime,digits=3)),$(r.exclude),\"$(r.reason)\"")
             flush(io)
         end
     end
 
     dataLines = collect(eachline(outCsv))[2:end]
-    totalExcluded = count(l -> !isempty(l) && split(l, ',')[8] == "true", dataLines)
+    totalExcluded = count(l -> !isempty(l) && split(l, ',')[11] == "true", dataLines)
     println("\nTotal instances checked: $(length(files))")
     println("Excluded: $totalExcluded")
     println("Kept: $(length(files) - totalExcluded)")
@@ -207,7 +223,7 @@ end
 # 1-based position in the sorted instance directory listing, and writes exactly one
 # CSV row (with header) to outDir/task_<taskIndex>.csv. Meant for SLURM array jobs:
 # one array task = one instance, so all instances run in parallel instead of
-# sequentially. Combine the per-task files afterward with scripts/merge_filter.sh.
+# sequentially. Combine the per-task files afterward with scripts/merge_single.sh.
 #
 # Solves the instance twice in this one process - a discarded JIT warm-up, then the
 # real, JIT-free measurement that gets written out (same pattern as clean.jl for
@@ -223,17 +239,21 @@ function runTask(instanceDir::String, outDir::String, rootTimeLimit::Float64, ta
     println("[task $taskIndex/$(length(files))] $f ...")
     flush(stdout)
 
-    # Discarded warm-up: same instance, same process, so the real solve below runs
-    # fully compiled.
+    # Discarded warm-up: same instance, same process, so the real solve below runs fully compiled.
     checkInstance(path, rootTimeLimit)
+
+    # Force the warm-up's SCIP model to be freed now, not whenever the GC gets to it -
+    # otherwise it can still be alive while the real solve below builds its own model,
+    # roughly doubling peak memory for a moment.
+    GC.gc()
 
     r = checkInstance(path, rootTimeLimit)
 
     mkpath(outDir)
     outPath = joinpath(outDir, "task_$(taskIndex).csv")
     open(outPath, "w") do io
-        println(io, "name,nVars,nBin,nInt,nCont,status,rootTime,exclude,reason")
-        println(io, "$(r.name),$(r.nVars),$(r.nBin),$(r.nInt),$(r.nCont),$(r.status),$(round(r.rootTime,digits=3)),$(r.exclude),\"$(r.reason)\"")
+        println(io, "name,nVars,nBin,nInt,nCont,status,rootTime,nRootLPIters,presolTime,solveTime,exclude,reason")
+        println(io, "$(r.name),$(r.nVars),$(r.nBin),$(r.nInt),$(r.nCont),$(r.status),$(round(r.rootTime,digits=3)),$(r.nRootLPIters),$(round(r.presolTime,digits=3)),$(round(r.solveTime,digits=3)),$(r.exclude),\"$(r.reason)\"")
     end
 
     println(r.exclude ? "EXCLUDE ($(r.reason))" : "keep")

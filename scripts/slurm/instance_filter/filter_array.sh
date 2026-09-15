@@ -13,7 +13,7 @@
 #   ... etc. Output goes to misc/filter_tasks_run<RUN_ID>/ (misc/filter_tasks/ if unset).
 #
 # After all tasks finish, merge the per-task CSVs into one report:
-#   bash scripts/merge_filter.sh misc/filter_tasks misc/filter_report.csv
+#   bash scripts/merge_single.sh misc/filter_tasks misc/filter_report.csv
 #   (or misc/filter_tasks_run<RUN_ID> / misc/filter_report_run<RUN_ID>.csv per repeat)
 
 #SBATCH --job-name=fpfw-filter
@@ -21,8 +21,9 @@
 #SBATCH --constraint=Gold6338
 #SBATCH --array=1-240
 #SBATCH --time=00:25:00
-#SBATCH --mem=16G
+#SBATCH --mem=32G
 #SBATCH --cpus-per-task=1
+#SBATCH --exclusive
 #SBATCH --output=/home/htc/aleoputra/project/FPmeetsFW/misc/slurm_logs/filter_%A_%a.out
 #SBATCH --error=/home/htc/aleoputra/project/FPmeetsFW/misc/slurm_logs/filter_%A_%a.err
 

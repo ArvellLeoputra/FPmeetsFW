@@ -3,14 +3,17 @@
 # rootTime varies run-to-run before deciding on a final keep/exclude threshold.
 #
 # This does NOT make the final keep/exclude call itself -- it just lays out the raw
-# numbers (all N rootTimes, mean, min, max, how many hit the 300s timelimit) so that
-# decision can be made deliberately afterward.
+# numbers (all N rootTimes, mean, min, max, how many hit the 300s timelimit, all N
+# root LP iteration counts, and whether those iteration counts agree across runs)
+# so that decision can be made deliberately afterward. itersMatch=false pinpoints
+# instances where repeats did genuinely different work, not just took different wall
+# time -- worth a closer look before trusting the timing alone.
 #
 # Usage:
-#   julia --project scripts/aggregate_filter_runs.jl <outCsv> <run1.csv> <run2.csv> ... <runN.csv>
+#   julia --project scripts/aggregate_filter.jl <outCsv> <run1.csv> <run2.csv> ... <runN.csv>
 #
 # Example:
-#   julia --project scripts/aggregate_filter_runs.jl misc/filter_report_aggregated.csv \
+#   julia --project scripts/aggregate_filter.jl misc/filter_report_aggregated.csv \
 #       misc/filter_report_run1.csv misc/filter_report_run2.csv misc/filter_report_run3.csv \
 #       misc/filter_report_run4.csv misc/filter_report_run5.csv
 
@@ -21,6 +24,7 @@ struct Row
     nCont::String
     status::String
     rootTime::Float64
+    nRootLPIters::Int
 end
 
 function readReport(path::String)::Dict{String, Row}
@@ -30,13 +34,13 @@ function readReport(path::String)::Dict{String, Row}
         isempty(line) && continue
         parts = split(line, ',')
         name = parts[1]
-        rows[name] = Row(parts[2], parts[3], parts[4], parts[5], parts[6], parse(Float64, parts[7]))
+        rows[name] = Row(parts[2], parts[3], parts[4], parts[5], parts[6], parse(Float64, parts[7]), parse(Int, parts[8]))
     end
     return rows
 end
 
 function main()
-    length(ARGS) >= 3 || error("Usage: julia --project scripts/aggregate_filter_runs.jl <outCsv> <run1.csv> <run2.csv> ...")
+    length(ARGS) >= 3 || error("Usage: julia --project scripts/aggregate_filter.jl <outCsv> <run1.csv> <run2.csv> ...")
 
     outCsv = ARGS[1]
     runPaths = ARGS[2:end]
@@ -52,22 +56,27 @@ function main()
     open(outCsv, "w") do io
         header = "name,nBin,nInt,nCont," *
                   join(["rootTime_run$k" for k in 1:n], ",") *
-                  ",mean,min,max,nTimelimit"
+                  ",mean,min,max,nTimelimit," *
+                  join(["iters_run$k" for k in 1:n], ",") *
+                  ",itersMatch"
         println(io, header)
 
         for name in allNames
             times = Float64[]
             statuses = String[]
+            iters = Union{Int,Missing}[]
             nBin = nInt = nCont = "?"
             for r in reports
                 if haskey(r, name)
                     row = r[name]
                     push!(times, row.rootTime)
                     push!(statuses, row.status)
+                    push!(iters, row.nRootLPIters)
                     nBin, nInt, nCont = row.nBin, row.nInt, row.nCont
                 else
                     push!(times, NaN)
                     push!(statuses, "missing")
+                    push!(iters, missing)
                 end
             end
 
@@ -77,8 +86,12 @@ function main()
             maxT = isempty(validTimes) ? NaN : maximum(validTimes)
             nTimelimit = count(==("timelimit"), statuses)
 
+            validIters = collect(skipmissing(iters))
+            itersMatch = length(unique(validIters)) <= 1
+
             timesStr = join([isnan(t) ? "NA" : string(round(t, digits=3)) for t in times], ",")
-            println(io, "$name,$nBin,$nInt,$nCont,$timesStr,$(round(meanT,digits=3)),$(round(minT,digits=3)),$(round(maxT,digits=3)),$nTimelimit")
+            itersStr = join([ismissing(v) ? "NA" : string(v) for v in iters], ",")
+            println(io, "$name,$nBin,$nInt,$nCont,$timesStr,$(round(meanT,digits=3)),$(round(minT,digits=3)),$(round(maxT,digits=3)),$nTimelimit,$itersStr,$itersMatch")
         end
     end
 
