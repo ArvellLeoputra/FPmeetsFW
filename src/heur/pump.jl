@@ -30,6 +30,25 @@ function hashRounded(x::Vector{Float64}, intIdx::Vector{Int})
     hash(tuple((x[i] for i in intIdx)...))
 end
 
+# Callback for runFW: stop a projection early once dual_gap hasn't improved by `minImprovement`
+function buildStallCallback(patience::Int, minImprovement::Float64; debug::Bool=false)
+    stallCount = Ref(0)
+    bestGap = Ref(Inf)
+    return (state, args...) -> begin
+        gap = state.dual_gap
+        if gap < bestGap[] * (1 - minImprovement)
+            bestGap[] = gap
+            stallCount[] = 0
+        else
+            stallCount[] += 1
+        end
+        if debug
+            println("    [stall] t=$(state.t) step=$(state.step_type) dual_gap=$gap bestGap=$(bestGap[]) stallCount=$(stallCount[])")
+        end
+        return stallCount[] < patience
+    end
+end
+
 # Compute the support of the violated constraints in the LP, restricted to eligible variables
 function infeasibleSupport(
     scip::Ptr{SCIP.SCIP_},

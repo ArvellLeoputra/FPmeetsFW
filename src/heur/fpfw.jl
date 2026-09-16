@@ -161,6 +161,13 @@ function fwProject(
         end
     end
 
+    # Build the callback for early termination if FW stagnates
+    callback = if config.fwMaxStagnation > 0
+        buildStallCallback(config.fwMaxStagnation, config.fwMinImprovement; debug=config.verbose >= 2)
+    else
+        nothing
+    end
+
     fwResult = runFW(
         config.fwVariant,
         f,
@@ -172,7 +179,7 @@ function fwProject(
         ls=ls,
         remainingTime=remainingTime,
         fwMaxIterations=config.fwMaxIterations,
-        callback=nothing,
+        callback=callback,
         verbose=false
     )
 

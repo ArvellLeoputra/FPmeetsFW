@@ -44,6 +44,10 @@ The fields can be set via a configuration file or command-line arguments.
     seed::Int = 42
     "verbosity level (0: summary only, 1: pump table, 2: per-iteration debug, 3: iteration diagnostics)"
     verbose::Int = 0
+    "stop a FW projection early after this many non-improving dual_gap steps in a row; 0 disables"
+    fwMaxStagnation::Int = DEF_FW_MAX_STAGNATION
+    "relative dual_gap improvement needed to reset fwMaxStagnation's counter"
+    fwMinImprovement::Float64 = DEF_FW_MIN_IMPROVEMENT
 end
 
 """

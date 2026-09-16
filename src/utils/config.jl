@@ -52,6 +52,8 @@ function buildFPFWConfig(params::Dict{String, String})
     fwMaxIterations = parse(Int, params["fwMaxIterations"])
     fwStepSize = Symbol(params["fwStepSize"])
     fixedStepSize = parse(Float64, get(params, "fixedStepSize", "0.5"))
+    fwMaxStagnation = parse(Int, get(params, "fwMaxStagnation", "0"))
+    fwMinImprovement = parse(Float64, get(params, "fwMinImprovement", "0.10"))
     timeLimit = parse(Float64, params["timeLimit"])
     alpha = parse(Float64, params["alpha"])
     alphaFactor = parse(Float64, params["alphaFactor"])
@@ -99,6 +101,14 @@ function buildFPFWConfig(params::Dict{String, String})
         error("Invalid fwMaxIterations: $fwMaxIterations. Must be a positive integer")
     end
 
+    if fwMaxStagnation < 0
+        error("Invalid fwMaxStagnation: $fwMaxStagnation. Must be >= 0 (0 disables the check)")
+    end
+
+    if fwMinImprovement <= 0.0 || fwMinImprovement >= 1.0
+        error("Invalid fwMinImprovement: $fwMinImprovement. Must be in (0, 1)")
+    end
+
     if alpha < 0.0 || alpha > 1.0
         error("Invalid alpha: $alpha. Must be in [0, 1]")
     end
@@ -114,6 +124,8 @@ function buildFPFWConfig(params::Dict{String, String})
         fwMaxIterations = fwMaxIterations,
         fwStepSize = fwStepSize,
         fixedStepSize = fixedStepSize,
+        fwMaxStagnation = fwMaxStagnation,
+        fwMinImprovement = fwMinImprovement,
         timeLimit = timeLimit,
         alpha = alpha,
         alphaFactor = alphaFactor,

@@ -88,6 +88,10 @@ function printConfigs(config::FPFWConfig)
     if config.fwStepSize == :fixed
         println("fixedStepSize = $(config.fixedStepSize)")
     end
+    println("fwMaxStagnation = $(config.fwMaxStagnation)")
+    if config.fwMaxStagnation > 0
+        println("fwMinImprovement = $(config.fwMinImprovement)")
+    end
     println("timeLimit = $(config.timeLimit)")
     println("alpha = $(config.alpha)")
     println("alphaFactor = $(config.alphaFactor)")

@@ -27,6 +27,10 @@ const DEF_ALPHA = 0.0  # initial objective weight
 const DEF_ALPHA_FACTOR = 0.9  # geometric decay per iteration
 const DEF_ALPHA_MIN = 1e-4  # alpha at or below this snaps to 0
 
+# FW stall-detection (inner-loop analogue of DEF_MIN_IMPROVEMENT/MAX_STAGNATION above)
+const DEF_FW_MAX_STAGNATION = 0  # consecutive non-improving FW steps before giving up early; 0 disables
+const DEF_FW_MIN_IMPROVEMENT = 0.10  # relative dual_gap improvement needed to reset the counter
+
 # Staging parameters
 const DEF_STAGE1_MAX_ITER = 10000
 const DEF_STAGE2_MAX_ITER = 2000

@@ -206,9 +206,59 @@ if [ "$tid" -ne "$NUM_TASKS" ]; then
     exit 1
 fi
 
-# ---- render the array job script (literal template + token substitution) ----
-JOB="$SWEEP_DIR/job_script.sh"
-cat > "$JOB" <<'TEMPLATE'
+# ---- split into multiple array jobs if NUM_TASKS exceeds this cluster's MaxArraySize ----
+# MaxArraySize caps the actual --array INDEX VALUES usable, not just how many
+# tasks one job has - so a range like 1001-1744 fails too if 1744 itself is over
+# the cap. The fix is separate array jobs, each with its own small 1..N range and
+# a renumbered slice of sweep_list.tsv, not just slicing the original ID range.
+MAX_ARRAY_SIZE=$(scontrol show config 2>/dev/null | awk -F'= *' '/^MaxArraySize/ {print $2}' | tr -d '[:space:]')
+case "$MAX_ARRAY_SIZE" in ''|*[!0-9]*) MAX_ARRAY_SIZE=0 ;; esac  # couldn't determine -> don't split
+
+if [ "$MAX_ARRAY_SIZE" -gt 0 ] && [ "$NUM_TASKS" -gt $((MAX_ARRAY_SIZE - 1)) ]; then
+    CHUNK_SIZE=$((MAX_ARRAY_SIZE - 1))
+    NUM_CHUNKS=$(( (NUM_TASKS + CHUNK_SIZE - 1) / CHUNK_SIZE ))
+    echo "  NOTE: $NUM_TASKS tasks exceeds this cluster's MaxArraySize ($MAX_ARRAY_SIZE)."
+    echo "        Splitting into $NUM_CHUNKS array jobs of up to $CHUNK_SIZE tasks each."
+else
+    CHUNK_SIZE=$NUM_TASKS
+    NUM_CHUNKS=1
+fi
+
+if [ "$EXCLUSIVE" = 1 ]; then
+    excl_line='#SBATCH --exclusive'
+else
+    excl_line='# (shared nodes; pass -x to submit_sweep.sh for --exclusive)'
+fi
+
+# "--sysimage <path> " (trailing space) or "" -> "julia [--sysimage ...]--project=..."
+if [ -n "$SYSIMAGE" ]; then
+    sysimage_tok="--sysimage $SYSIMAGE "
+else
+    sysimage_tok=""
+fi
+
+declare -a JOBIDS=()
+
+for c in $(seq 1 "$NUM_CHUNKS"); do
+    start=$(( (c - 1) * CHUNK_SIZE + 1 ))
+    end=$(( c * CHUNK_SIZE ))
+    [ "$end" -gt "$NUM_TASKS" ] && end=$NUM_TASKS
+    this_chunk_size=$(( end - start + 1 ))
+
+    if [ "$NUM_CHUNKS" -gt 1 ]; then
+        CHUNK_LIST="$SWEEP_DIR/sweep_list_chunk${c}.tsv"
+        # renumber column 1 to a local 1..this_chunk_size range for this chunk's own --array
+        awk -F'\t' -v s="$start" -v e="$end" 'BEGIN{OFS="\t"} $1>=s && $1<=e {$1=$1-s+1; print}' "$SWEEP_LIST" > "$CHUNK_LIST"
+        JOB="$SWEEP_DIR/job_script_chunk${c}.sh"
+        job_name="${SWEEP_NAME}_c${c}"
+    else
+        CHUNK_LIST="$SWEEP_LIST"
+        JOB="$SWEEP_DIR/job_script.sh"
+        job_name="$SWEEP_NAME"
+    fi
+
+    # ---- render this chunk's array job script (literal template + token substitution) ----
+    cat > "$JOB" <<'TEMPLATE'
 #!/bin/bash
 #SBATCH --job-name=@@NAME@@
 #SBATCH --time=@@WALLTIME@@
@@ -255,33 +305,27 @@ julia @@SYSIMAGE@@--project="$FPFW_DIR" "$FPFW_DIR/@@RUNNER@@" \
     "$INSTANCE_PATH" "$RESULT_DIR/config.cfg" "resultsDir=$INSTANCE_RESULT_DIR"
 TEMPLATE
 
-if [ "$EXCLUSIVE" = 1 ]; then
-    excl_line='#SBATCH --exclusive'
-else
-    excl_line='# (shared nodes; pass -x to submit_sweep.sh for --exclusive)'
-fi
+    # paths here contain no '|', safe as sed delimiter
+    sed -i \
+        -e "s|@@NAME@@|$job_name|g" \
+        -e "s|@@WALLTIME@@|$TIME_LIMIT|g" \
+        -e "s|@@NTASKS@@|$this_chunk_size|g" \
+        -e "s|@@THROTTLE@@|$THROTTLE|g" \
+        -e "s|@@EXCLUSIVE@@|$excl_line|g" \
+        -e "s|@@JULIA_BIN@@|$JULIA_BIN|g" \
+        -e "s|@@SWEEP_LIST@@|$CHUNK_LIST|g" \
+        -e "s|@@FPFW_DIR@@|$FPFW_DIR|g" \
+        -e "s|@@SYSIMAGE@@|$sysimage_tok|g" \
+        -e "s|@@RUNNER@@|$RUNNER|g" \
+        "$JOB"
+    chmod +x "$JOB"
 
-# "--sysimage <path> " (trailing space) or "" -> "julia [--sysimage ...]--project=..."
-if [ -n "$SYSIMAGE" ]; then
-    sysimage_tok="--sysimage $SYSIMAGE "
-else
-    sysimage_tok=""
-fi
-
-# paths here contain no '|', safe as sed delimiter
-sed -i \
-    -e "s|@@NAME@@|$SWEEP_NAME|g" \
-    -e "s|@@WALLTIME@@|$TIME_LIMIT|g" \
-    -e "s|@@NTASKS@@|$NUM_TASKS|g" \
-    -e "s|@@THROTTLE@@|$THROTTLE|g" \
-    -e "s|@@EXCLUSIVE@@|$excl_line|g" \
-    -e "s|@@JULIA_BIN@@|$JULIA_BIN|g" \
-    -e "s|@@SWEEP_LIST@@|$SWEEP_LIST|g" \
-    -e "s|@@FPFW_DIR@@|$FPFW_DIR|g" \
-    -e "s|@@SYSIMAGE@@|$sysimage_tok|g" \
-    -e "s|@@RUNNER@@|$RUNNER|g" \
-    "$JOB"
-chmod +x "$JOB"
+    if [ "$DRY_RUN" != 1 ]; then
+        JOBID=$(sbatch --parsable "$JOB")
+        JOBIDS+=("$JOBID")
+        echo "Submitted array job $JOBID  (chunk $c/$NUM_CHUNKS, tasks $start-$end, up to $THROTTLE concurrent)"
+    fi
+done
 
 # ---- manifest ----
 {
@@ -292,13 +336,13 @@ chmod +x "$JOB"
     echo "seeds      : ${SEED_ARR[*]}"
     echo "instances  : $NUM_INST ($INSTANCE_DIR)"
     echo "tasks      : $NUM_TASKS"
+    echo "chunks     : $NUM_CHUNKS (up to $CHUNK_SIZE tasks each, MaxArraySize=$MAX_ARRAY_SIZE)"
     echo "throttle   : $THROTTLE"
     echo "walltime   : $TIME_LIMIT"
     echo "exclusive  : $EXCLUSIVE"
     echo "sysimage   : ${SYSIMAGE:-<none>}"
     echo "runner     : $RUNNER"
     echo "sweep_list : $SWEEP_LIST"
-    echo "job_script : $JOB"
 } > "$SWEEP_DIR/MANIFEST"
 
 ANALYZE_CMD="./analyze_configs.sh ${FOLDERS[*]}"
@@ -306,8 +350,8 @@ ANALYZE_CMD="./analyze_configs.sh ${FOLDERS[*]}"
 if [ "$DRY_RUN" = 1 ]; then
     echo
     echo "[dry run] built (no sbatch, result dirs untouched):"
-    echo "  $SWEEP_LIST   ($NUM_TASKS rows)"
-    echo "  $JOB"
+    echo "  $SWEEP_LIST   ($NUM_TASKS rows total, $NUM_CHUNKS chunk(s) of up to $CHUNK_SIZE)"
+    echo "  $SWEEP_DIR/job_script*.sh"
     echo "  $SWEEP_DIR/MANIFEST"
     echo "First / last task rows:"
     head -n1 "$SWEEP_LIST" | sed 's/^/  /'
@@ -316,11 +360,10 @@ if [ "$DRY_RUN" = 1 ]; then
     exit 0
 fi
 
-JOBID=$(sbatch --parsable "$JOB")
-echo "$JOBID" > "$SWEEP_DIR/JOBID"
-echo "jobid      : $JOBID" >> "$SWEEP_DIR/MANIFEST"
+printf '%s\n' "${JOBIDS[@]}" > "$SWEEP_DIR/JOBID"
+echo "jobids     : ${JOBIDS[*]}" >> "$SWEEP_DIR/MANIFEST"
 
 echo
-echo "Submitted array job $JOBID  ($NUM_TASKS tasks, up to $THROTTLE concurrent)"
-echo "  watch:      squeue -j $JOBID"
+echo "Submitted $NUM_CHUNKS array job(s): ${JOBIDS[*]}  ($NUM_TASKS tasks total, up to $THROTTLE concurrent per job)"
+echo "  watch:      squeue -j $(IFS=,; echo "${JOBIDS[*]}")"
 echo "  aggregate:  $ANALYZE_CMD"
