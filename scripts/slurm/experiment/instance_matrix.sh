@@ -31,6 +31,21 @@ for folder in "$@"; do
     fi
 done
 
+# Warn (don't fail) if the given folders were run against different instance sets -
+# e.g. miplib_selected was changed between runs. Folders from before
+# instance_manifest.txt existed have no manifest and can't be verified.
+FIRST_MANIFEST="$COMP_RESULT/$1/instance_manifest.txt"
+if [ -f "$FIRST_MANIFEST" ]; then
+    for folder in "$@"; do
+        m="$COMP_RESULT/$folder/instance_manifest.txt"
+        if [ ! -f "$m" ]; then
+            echo "Warning: $folder has no recorded instance_manifest.txt (older run) - cannot verify it used the same instance set as $1" >&2
+        elif ! diff -q "$FIRST_MANIFEST" "$m" > /dev/null 2>&1; then
+            echo "Warning: $folder was run against a DIFFERENT instance set than $1 (instance_manifest.txt differs) - matrix rows below may not line up" >&2
+        fi
+    done
+fi
+
 OUT_DIR="$COMP_RESULT/config_comparison"
 mkdir -p "$OUT_DIR"
 CSV="$OUT_DIR/instance_matrix.csv"

@@ -7,7 +7,7 @@
 #SBATCH --mem=16G
 #SBATCH --partition=big
 #SBATCH --constraint=Gold6338
-#SBATCH --array=1-$NUM_INSTANCES%8
+#SBATCH --array=1-$NUM_INSTANCES%$THROTTLE
 #SBATCH --output=/dev/null
 #SBATCH --error=/dev/null
 

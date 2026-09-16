@@ -3,20 +3,27 @@
 # Created for backfilling instances an array job never finished (e.g. silently killed by the wall-clock limit)
 #
 # Usage:
-#   ./submit_single.sh <instance_basename> <folder>
+#   ./submit_single.sh <instance_basename> <folder> [slurmWalltime]
+#
+#   slurmWalltime  value for "#SBATCH --time" (default 1:00:00). Worth raising
+#                  above the array job's original walltime when re-running an
+#                  instance that was killed for running out of time.
 #
 # Example (re-run rmatr200-p5 into the already-existing fpfw_run2 folder):
 #   ./submit_single.sh rmatr200-p5 fpfw_run2
+# Example (same, but with a longer walltime since it was killed by the original one):
+#   ./submit_single.sh rmatr200-p5 fpfw_run2 4:00:00
 
 set -euo pipefail
 
 if [ $# -lt 2 ]; then
-    echo "Usage: ./submit_single.sh <instance_basename> <folder>" >&2
+    echo "Usage: ./submit_single.sh <instance_basename> <folder> [slurmWalltime]" >&2
     exit 1
 fi
 
 INSTANCE_BASENAME="$1"
 FOLDER="$2"
+TIME_LIMIT="${3:-1:00:00}"
 
 PROJECT_DIR="/home/htc/aleoputra/project"
 FPFW_DIR="$PROJECT_DIR/FPmeetsFW"
@@ -45,7 +52,7 @@ sbatch <<EOF
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=16G
-#SBATCH --time=1:00:00
+#SBATCH --time=$TIME_LIMIT
 #SBATCH --partition=big
 #SBATCH --constraint=Gold6338
 #SBATCH --output=$INSTANCE_RESULT_DIR/slurm_job.out
@@ -60,4 +67,4 @@ echo "Node: \$(hostname)"
 julia --project=$FPFW_DIR $FPFW_DIR/main.jl "$INSTANCE_PATH" "$CONFIG" "resultsDir=$INSTANCE_RESULT_DIR"
 EOF
 
-echo "Submitted single run: $INSTANCE_BASENAME -> $FOLDER"
+echo "Submitted single run: $INSTANCE_BASENAME -> $FOLDER (walltime=$TIME_LIMIT)"

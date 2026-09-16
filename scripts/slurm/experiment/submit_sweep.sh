@@ -26,6 +26,9 @@
 #   -n NAME     sweep name / bookkeeping dir     (default: sweep)
 #   -S PATH     run each task as "julia --sysimage PATH ..." to skip JIT/load
 #               (build it with: julia scripts/sysimage/build.jl)
+#   -R          run each task via clean.jl instead of main.jl (a discarded warm-up
+#               solve, then the real one) - a JIT-safe alternative to -S when the
+#               sysimage might be stale. Mutually exclusive with -S.
 #   -x          add "#SBATCH --exclusive" (one task per node; use with small -j
 #               and a short instance list for a trustworthy-absolute-time run)
 #   -y          don't prompt before wiping existing <folder>_s<seed> dirs
@@ -40,7 +43,7 @@
 set -euo pipefail
 
 usage() {
-    sed -n '2,39p' "$0" | sed 's/^#\{1,\} \{0,1\}//; s/^#$//'
+    sed -n '2,41p' "$0" | sed 's/^#\{1,\} \{0,1\}//; s/^#$//'
 }
 
 SEEDS="1 2 3 4 5"
@@ -51,8 +54,9 @@ EXCLUSIVE=0
 ASSUME_YES=0
 DRY_RUN=0
 SYSIMAGE=""
+USE_CLEAN=0
 
-while getopts "s:t:j:n:S:xyd" opt; do
+while getopts "s:t:j:n:S:xyRd" opt; do
     case "$opt" in
         s) SEEDS="$OPTARG" ;;
         t) TIME_LIMIT="$OPTARG" ;;
@@ -61,6 +65,7 @@ while getopts "s:t:j:n:S:xyd" opt; do
         S) SYSIMAGE="$OPTARG" ;;
         x) EXCLUSIVE=1 ;;
         y) ASSUME_YES=1 ;;
+        R) USE_CLEAN=1 ;;
         d) DRY_RUN=1 ;;
         *) usage >&2; exit 1 ;;
     esac
@@ -71,6 +76,14 @@ if [ -n "$SYSIMAGE" ]; then
     case "$SYSIMAGE" in /*) : ;; *) SYSIMAGE="$PWD/$SYSIMAGE" ;; esac
     [ -f "$SYSIMAGE" ] || { echo "Error: sysimage not found: $SYSIMAGE" >&2; exit 1; }
 fi
+
+if [ -n "$SYSIMAGE" ] && [ "$USE_CLEAN" = 1 ]; then
+    echo "Error: -S and -R are mutually exclusive" >&2
+    exit 1
+fi
+
+RUNNER="main.jl"
+[ "$USE_CLEAN" = 1 ] && RUNNER="clean.jl"
 
 if [ $# -lt 1 ]; then
     echo "Error: need at least one <cfg>" >&2
@@ -139,6 +152,7 @@ echo "  seeds     : ${SEED_ARR[*]}"
 echo "  instances : $NUM_INST  ($INSTANCE_DIR)"
 echo "  tasks     : $NUM_TASKS   (array 1-$NUM_TASKS%$THROTTLE, --time=$TIME_LIMIT/task$([ "$EXCLUSIVE" = 1 ] && echo ', --exclusive'))"
 echo "  sysimage  : ${SYSIMAGE:-<none, plain julia>}"
+echo "  runner    : $RUNNER"
 echo "  writes    : $COMP_RESULT/{$(IFS=,; echo "${TARGETS[*]}")}/"
 
 existing=0
@@ -175,6 +189,9 @@ for i in "${!CFGS[@]}"; do
             else
                 echo "seed=$seed" >> "$rd/config.cfg"
             fi
+            # Record the exact instance set this sweep used, same as submit_experiment.sh,
+            # so analyze_configs.sh / instance_matrix.sh can flag cross-run instance-set drift.
+            printf '%s\n' "${INSTANCES[@]}" | sort > "$rd/instance_manifest.txt"
         fi
         for inst in "${INSTANCES[@]}"; do
             tid=$((tid + 1))
@@ -234,7 +251,7 @@ echo "Config file: $RESULT_DIR/config.cfg"
 echo "Instance:    $INSTANCE_PATH"
 echo "Timestamp:   $(date '+%Y-%m-%d %H:%M:%S')"
 
-julia @@SYSIMAGE@@--project="$FPFW_DIR" "$FPFW_DIR/main.jl" \
+julia @@SYSIMAGE@@--project="$FPFW_DIR" "$FPFW_DIR/@@RUNNER@@" \
     "$INSTANCE_PATH" "$RESULT_DIR/config.cfg" "resultsDir=$INSTANCE_RESULT_DIR"
 TEMPLATE
 
@@ -262,6 +279,7 @@ sed -i \
     -e "s|@@SWEEP_LIST@@|$SWEEP_LIST|g" \
     -e "s|@@FPFW_DIR@@|$FPFW_DIR|g" \
     -e "s|@@SYSIMAGE@@|$sysimage_tok|g" \
+    -e "s|@@RUNNER@@|$RUNNER|g" \
     "$JOB"
 chmod +x "$JOB"
 
@@ -278,6 +296,7 @@ chmod +x "$JOB"
     echo "walltime   : $TIME_LIMIT"
     echo "exclusive  : $EXCLUSIVE"
     echo "sysimage   : ${SYSIMAGE:-<none>}"
+    echo "runner     : $RUNNER"
     echo "sweep_list : $SWEEP_LIST"
     echo "job_script : $JOB"
 } > "$SWEEP_DIR/MANIFEST"

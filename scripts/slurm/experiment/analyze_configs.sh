@@ -66,6 +66,26 @@ ensure_summary() {
     [ -f "$summary" ]
 }
 
+# Warn (don't fail) if the folders being compared were run against different
+# instance sets - e.g. miplib_selected was changed between runs. Folders from
+# before instance_manifest.txt existed have no manifest and are skipped, not
+# flagged. Compares every folder against the first one that has a manifest.
+REF_MANIFEST=""
+REF_MANIFEST_FOLDER=""
+check_instance_manifest() {
+    local folder="$1"
+    local m="$COMP_RESULT/$folder/instance_manifest.txt"
+    [ -f "$m" ] || return 0
+    if [ -z "$REF_MANIFEST" ]; then
+        REF_MANIFEST="$m"
+        REF_MANIFEST_FOLDER="$folder"
+        return 0
+    fi
+    if ! diff -q "$REF_MANIFEST" "$m" > /dev/null 2>&1; then
+        echo "Warning: $folder was run against a DIFFERENT instance set than $REF_MANIFEST_FOLDER (instance_manifest.txt differs) - this comparison may be misleading" >&2
+    fi
+}
+
 # mean / sample-SD / min / max of numbers read from stdin (one per line).
 # Prints "mean sd min max"; SD is 0 when n < 2.
 statline() {
@@ -117,6 +137,7 @@ for config in "$@"; do
             echo "Warning: could not generate summary for $f, skipping" >&2
             continue
         fi
+        check_instance_manifest "$f"
         s="$COMP_RESULT/config_comparison/$f/solution_summary.txt"
 
         seed="${f##*_s}"

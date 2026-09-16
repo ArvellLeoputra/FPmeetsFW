@@ -380,6 +380,10 @@ function SCIP.find_primal_solution(
                         st.stagnationCount = 0
                         st.bestProjObj = Inf
                         h = hashRounded(xRound, st.activeIntIdx)  # rehash after perturbation
+                        # check if the perturbation produced an already-seen rounded solution
+                        if h in visitedRounded
+                            doRestart = true
+                        end
                     else
                         # edge case: perturbation failed to flip any variables, so escalate to a restart
                         # happens only when the LP solution is already integral but rejected by SCIP
