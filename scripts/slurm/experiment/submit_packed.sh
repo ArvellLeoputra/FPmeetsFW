@@ -20,8 +20,12 @@
 # own siblings - no cross-user memory-bandwidth/cache/turbo noise.
 #
 # Usage:
-#   ./submit_packed.sh <cfgName> <folderName> [concurrency] [slurmWalltime]
+#   ./submit_packed.sh [-R] <cfgName> <folderName> [concurrency] [slurmWalltime]
 #
+#   -R             run each instance via clean.jl instead of main.jl (a
+#                  discarded warm-up solve, then the real one) - each
+#                  instance still gets its own Julia process, so JIT still
+#                  needs warming per instance even though they run packed.
 #   concurrency    max instances running at once on the one reserved node
 #                  (default 30).
 #   slurmWalltime  value for "#SBATCH --time" for the WHOLE run (default
@@ -40,8 +44,17 @@
 
 set -euo pipefail
 
+USE_CLEAN=0
+while getopts "R" opt; do
+    case "$opt" in
+        R) USE_CLEAN=1 ;;
+        *) echo "Usage: ./submit_packed.sh [-R] <cfgName> <folderName> [concurrency] [slurmWalltime]" >&2; exit 1 ;;
+    esac
+done
+shift $((OPTIND - 1))
+
 if [ $# -lt 2 ]; then
-    echo "Usage: ./submit_packed.sh <cfgName> <folderName> [concurrency] [slurmWalltime]" >&2
+    echo "Usage: ./submit_packed.sh [-R] <cfgName> <folderName> [concurrency] [slurmWalltime]" >&2
     exit 1
 fi
 
@@ -49,6 +62,9 @@ CFG_NAME="$1"
 FOLDER="$2"
 CONCURRENCY="${3:-30}"
 TIME_LIMIT="${4:-4:00:00}"
+
+RUNNER="main.jl"
+[ "$USE_CLEAN" = 1 ] && RUNNER="clean.jl"
 
 case "$CONCURRENCY" in ''|*[!0-9]*) echo "Error: concurrency must be a positive integer, got '$CONCURRENCY'" >&2; exit 1 ;; esac
 [ "$CONCURRENCY" -ge 1 ] || { echo "Error: concurrency must be >= 1" >&2; exit 1; }
@@ -114,7 +130,7 @@ run_one() {
     base="\${base%.mps}"
     local instance_result_dir="$RESULT_DIR/\$base"
     mkdir -p "\$instance_result_dir"
-    julia --project=$FPFW_DIR $FPFW_DIR/main.jl "$INSTANCE_DIR/\$instance" "$RUN_CONFIG" "resultsDir=\$instance_result_dir" \
+    julia --project=$FPFW_DIR $FPFW_DIR/$RUNNER "$INSTANCE_DIR/\$instance" "$RUN_CONFIG" "resultsDir=\$instance_result_dir" \
         > "\$instance_result_dir/slurm_job.out" 2> "\$instance_result_dir/slurm_job.err"
 }
 export -f run_one
@@ -125,4 +141,4 @@ chmod +x "$JOB_SCRIPT"
 
 sbatch "$JOB_SCRIPT" || { echo "ERROR: sbatch failed for $FOLDER"; exit 1; }
 
-echo "Submitted: $FOLDER ($NUM_INSTANCES instances, cfg=${CFG_NAME}, concurrency=${CONCURRENCY}, 1 exclusive node, walltime=${TIME_LIMIT})"
+echo "Submitted: $FOLDER ($NUM_INSTANCES instances, cfg=${CFG_NAME}, concurrency=${CONCURRENCY}, 1 exclusive node, walltime=${TIME_LIMIT}, runner=${RUNNER})"

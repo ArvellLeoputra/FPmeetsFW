@@ -28,20 +28,17 @@ else
     CONFIG="$SETTINGS_DIR/${CFG_NAME}.cfg"
 fi
 
-RUN_NAME=$(grep '^runName=' "$CONFIG" | cut -d'=' -f2)
-SEED=$(grep '^seed=' "$CONFIG" | cut -d'=' -f2)
-NORM=$(grep '^norm=' "$CONFIG" | cut -d'=' -f2)
-VARIANT=$(grep '^fwVariant=' "$CONFIG" | cut -d'=' -f2)
-FW_MAX_ITER=$(grep '^fwMaxIterations=' "$CONFIG" | cut -d'=' -f2)
-STEP_SIZE=$(grep '^fwStepSize=' "$CONFIG" | cut -d'=' -f2)
+# timeLimit is also needed below, in the FAILED-run reason strings
 TIME_LIMIT=$(grep '^timeLimit=' "$CONFIG" | cut -d'=' -f2)
-RAND_ROUND=$(grep '^randomizedRounding=' "$CONFIG" | cut -d'=' -f2)
-RAND_FEAS_CHECK=$(grep '^randomFeasibilityCheck=' "$CONFIG" | cut -d'=' -f2)
-FW_WARM_START=$(grep '^fwWarmStart=' "$CONFIG" | cut -d'=' -f2)
-LMO_WARM_START=$(grep '^lmoWarmStart=' "$CONFIG" | cut -d'=' -f2)
+
+# Feature toggles gating which per-instance stats are worth printing below -
+# no point showing lock/dive/walksat/rand-feas-check stats when the run
+# never had that feature turned on (they'd just be constant zeros).
+FW_LOCK_THRESHOLD=$(grep '^fwLockThreshold=' "$CONFIG" | cut -d'=' -f2)
+WALKSAT_PERTURB=$(grep '^walksatPerturb=' "$CONFIG" | cut -d'=' -f2)
 USE_DIVE=$(grep '^useDive=' "$CONFIG" | cut -d'=' -f2)
-PRESOLVE=$(grep '^presolve=' "$CONFIG" | cut -d'=' -f2)
-VERBOSE=$(grep '^verbose=' "$CONFIG" | cut -d'=' -f2)
+RAND_FEAS_CHECK=$(grep '^randomFeasibilityCheck=' "$CONFIG" | cut -d'=' -f2)
+lock_enabled() { awk -v v="${FW_LOCK_THRESHOLD:-0}" 'BEGIN { exit !(v + 0 > 0) }'; }
 
 RES_DIR="$COMP_RESULT/config_comparison/$FOLDER"
 rm -rf "$RES_DIR"
@@ -57,20 +54,13 @@ echo "==========================================================" >> "$SUMMARY"
 
 echo "DETAILED RESULTS" > "$DETAILED"
 echo "==========================================================" >> "$DETAILED"
-echo "  Run name:           $RUN_NAME" >> "$DETAILED"
-echo "  Seed:               $SEED" >> "$DETAILED"
-echo "  Projection norm:    $NORM" >> "$DETAILED"
-echo "  FW variant:         $VARIANT" >> "$DETAILED"
-echo "  FW max iterations:  $FW_MAX_ITER" >> "$DETAILED"
-echo "  Step size:          $STEP_SIZE" >> "$DETAILED"
-echo "  Time limit:         ${TIME_LIMIT}s" >> "$DETAILED"
-echo "  Rand rounding:      $RAND_ROUND" >> "$DETAILED"
-echo "  Rand feas check:    $RAND_FEAS_CHECK" >> "$DETAILED"
-echo "  FW warm start:      $FW_WARM_START" >> "$DETAILED"
-echo "  LMO warm start:     $LMO_WARM_START" >> "$DETAILED"
-echo "  Use dive:           $USE_DIVE" >> "$DETAILED"
-echo "  Presolve:           $PRESOLVE" >> "$DETAILED"
-echo "  Verbose:            $VERBOSE" >> "$DETAILED"
+# Print every key in the archived config as-is, so a newly-added FPFWConfig
+# field shows up automatically instead of needing a matching line here.
+# `|| [ -n "$line" ]` catches a final line with no trailing newline (read
+# would otherwise return failure and skip it before the body ever runs).
+while IFS= read -r line || [ -n "$line" ]; do
+    [ -n "$line" ] && echo "  $line" >> "$DETAILED"
+done < "$CONFIG"
 echo "==========================================================" >> "$DETAILED"
 echo "" >> "$DETAILED"
 
@@ -139,6 +129,14 @@ for instance_dir in "$RESULT_DIR"/*/; do
         fw_iterations=$(jq -r '.fwIterations' "$results_json")
         restarts=$(jq -r '.restartCount' "$results_json")
         perturbations=$(jq -r '.perturbCount' "$results_json")
+        lock_vars_peak=$(jq -r '.lockVarsPeak' "$results_json")
+        lock_infeasible_retries=$(jq -r '.lockInfeasibleRetries' "$results_json")
+        lock_rejected=$(jq -r '.lockRejected' "$results_json")
+        lock_check_simplex_iters=$(jq -r '.lockCheckSimplexIters' "$results_json")
+        walksat_count=$(jq -r '.walksatCount' "$results_json")
+        dive_calls=$(jq -r '.diveCalls' "$results_json")
+        dive_time=$(awk -v t="$(jq -r '.diveTime' "$results_json")" 'BEGIN { printf "%.2f", t }')
+        rfc_calls=$(jq -r '.rfcCalls' "$results_json")
         objective=$(jq -r '.primalBound' "$results_json")
         gap_frac=$(jq -r '.gap' "$results_json")
         gap=$(awk -v g="$gap_frac" 'BEGIN { printf "%.2f", g * 100 }')
@@ -159,6 +157,14 @@ for instance_dir in "$RESULT_DIR"/*/; do
         fw_iterations=""
         restarts=""
         perturbations=""
+        lock_vars_peak=""
+        lock_infeasible_retries=""
+        lock_rejected=""
+        lock_check_simplex_iters=""
+        walksat_count=""
+        dive_calls=""
+        dive_time=""
+        rfc_calls=""
         objective="N/A"
         gap="N/A"
     fi
@@ -241,6 +247,18 @@ for instance_dir in "$RESULT_DIR"/*/; do
     printf "  %-18s%s\n" "FW time:" "${fw_time}s" >> "$DETAILED"
     printf "  %-18s%s\n" "Perturbations:" "${perturbations}" >> "$DETAILED"
     printf "  %-18s%s\n" "Restarts:" "${restarts}" >> "$DETAILED"
+    if lock_enabled; then
+        printf "  %-18s%s\n" "Lock vars peak:" "${lock_vars_peak}" >> "$DETAILED"
+        printf "  %-18s%s\n" "Lock retries:" "${lock_infeasible_retries}" >> "$DETAILED"
+        printf "  %-18s%s\n" "Lock rejected:" "${lock_rejected}" >> "$DETAILED"
+        printf "  %-18s%s\n" "Lock chk iters:" "${lock_check_simplex_iters}" >> "$DETAILED"
+    fi
+    [ "$WALKSAT_PERTURB" = "true" ] && printf "  %-18s%s\n" "WalkSAT count:" "${walksat_count}" >> "$DETAILED"
+    if [ "$USE_DIVE" = "true" ]; then
+        printf "  %-18s%s\n" "Dive calls:" "${dive_calls}" >> "$DETAILED"
+        printf "  %-18s%s\n" "Dive time:" "${dive_time}s" >> "$DETAILED"
+    fi
+    [ "$RAND_FEAS_CHECK" = "true" ] && printf "  %-18s%s\n" "Rand feas calls:" "${rfc_calls}" >> "$DETAILED"
     printf "  %-18s%s\n" "Exit reason:" "${exit_reason_code}" >> "$DETAILED"
     if [ "$solution_found" = "true" ]; then
         printf "  %-18s%s\n" "Objective:" "${objective}" >> "$DETAILED"

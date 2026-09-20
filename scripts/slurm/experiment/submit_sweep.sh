@@ -1,10 +1,15 @@
 #!/bin/bash
 #
 # submit_sweep.sh - launch the whole {config x seed x instance} comparison as ONE
-# interleaved SLURM array job. Because every cell runs in the same job, in the
-# same time window, on the same pool of nodes, cross-config and cross-seed
-# comparisons are not distorted by "which day / how busy the cluster was".
-# (That artifact is exactly why the Aug-24 vs Aug-25 runs weren't comparable.)
+# SLURM array job, with tasks ordered instance-major (instance -> seed -> config)
+# so every config/seed's copy of a given instance gets adjacent array indices and
+# lands in the same handful of --array=...%THROTTLE concurrent slots. That's what
+# actually prevents cross-config/cross-seed comparisons from being distorted by
+# "which day / how busy the cluster was" - one shared array job alone isn't enough
+# (config-major task order still runs each config's whole block sequentially in
+# wall-clock time; that's exactly why the Aug-24 vs Aug-25 runs weren't comparable,
+# and why a naive single-job config-major sweep can reproduce the same artifact
+# at a smaller scale).
 #
 # Each task writes to:
 #   compResult/<folder>_s<seed>/<instance>/{slurm_job.out,slurm_job.err,results.json}
@@ -167,19 +172,18 @@ if [ "$existing" -gt 0 ] && [ "$ASSUME_YES" != 1 ] && [ "$DRY_RUN" != 1 ]; then
     fi
 fi
 
-# ---- build per-(folder,seed) result trees + archived configs, and the task list ----
+# ---- pre-create per-(folder,seed) result trees + archived configs ----
 SWEEP_DIR="$COMP_RESULT/$SWEEP_NAME"
 mkdir -p "$SWEEP_DIR"
-SWEEP_LIST="$SWEEP_DIR/sweep_list.tsv"
-: > "$SWEEP_LIST"
 
-tid=0
+declare -A RESULT_DIR   # key: "<folder>\x1e<seed>" -> result dir path
 for i in "${!CFGS[@]}"; do
     cfg="${CFGS[$i]}"
     folder="${FOLDERS[$i]}"
     src="$SETTINGS_DIR/$cfg.cfg"
     for seed in "${SEED_ARR[@]}"; do
         rd="$COMP_RESULT/${folder}_s${seed}"
+        RESULT_DIR["${folder}"$'\x1e'"${seed}"]="$rd"
         if [ "$DRY_RUN" != 1 ]; then
             rm -rf "$rd"
             mkdir -p "$rd"
@@ -193,7 +197,26 @@ for i in "${!CFGS[@]}"; do
             # so analyze_configs.sh / instance_matrix.sh can flag cross-run instance-set drift.
             printf '%s\n' "${INSTANCES[@]}" | sort > "$rd/instance_manifest.txt"
         fi
-        for inst in "${INSTANCES[@]}"; do
+    done
+done
+
+# ---- build the task list in INSTANCE-MAJOR order (instance -> seed -> config) ----
+# Every (config, seed) copy of the same instance gets adjacent array indices, so
+# under --array=...%THROTTLE they land in the same handful of concurrent slots.
+# Whatever cluster load or node contention shows up during that instance's run
+# hits all configs/seeds together, instead of systematically favoring whichever
+# config's block of the array happened to get dispatched earlier or later (the
+# config-major order this replaced let one config's whole block run in a quieter
+# window than another's, confounding config comparisons with time-of-run).
+SWEEP_LIST="$SWEEP_DIR/sweep_list.tsv"
+: > "$SWEEP_LIST"
+
+tid=0
+for inst in "${INSTANCES[@]}"; do
+    for seed in "${SEED_ARR[@]}"; do
+        for i in "${!CFGS[@]}"; do
+            folder="${FOLDERS[$i]}"
+            rd="${RESULT_DIR["${folder}"$'\x1e'"${seed}"]}"
             tid=$((tid + 1))
             printf '%d\t%s\t%s\t%s\t%s\t%s\n' \
                 "$tid" "$folder" "$seed" "$rd" "$inst" "$INSTANCE_DIR/$inst" >> "$SWEEP_LIST"
