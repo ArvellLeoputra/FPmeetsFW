@@ -26,6 +26,7 @@ include("fw/lmoLPI.jl")
 include("fw/driver.jl")
 
 include("heur/pump.jl")
+include("heur/lock.jl")
 include("heur/fpfw.jl")
 include("heur/runner.jl")
 

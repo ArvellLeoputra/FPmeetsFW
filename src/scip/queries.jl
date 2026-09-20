@@ -32,8 +32,7 @@ function getLPInfo(scip::Ptr{SCIP.SCIP_})
     intIdx = [binIdx; gIntIdx]
     objScale = sqrt(sum(abs2, objCoeffs))
 
-    return LPInfo(; lpCols, lpRows, objCoeffs, objScale, colDict, binIdx,
-                  binSet, gIntIdx, intIdx, ncols, nrows, initSol)
+    return LPInfo(; lpCols, lpRows, objCoeffs, objScale, colDict, binIdx, binSet, gIntIdx, intIdx, ncols, nrows, initSol)
 end
 
 function origObjective(scip::Ptr{SCIP.SCIP_}, lpCols::Vector{Ptr{SCIP.SCIP_COL}}, sol::Vector{Float64}, ncols::Int32)

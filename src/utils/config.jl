@@ -52,8 +52,11 @@ function buildFPFWConfig(params::Dict{String, String})
     fwMaxIterations = parse(Int, params["fwMaxIterations"])
     fwStepSize = Symbol(params["fwStepSize"])
     fixedStepSize = parse(Float64, get(params, "fixedStepSize", "0.5"))
-    fwMaxStagnation = parse(Int, get(params, "fwMaxStagnation", "0"))
+    fwStallMaxIters = parse(Int, get(params, "fwStallMaxIters", "0"))
     fwMinImprovement = parse(Float64, get(params, "fwMinImprovement", "0.10"))
+    fwLockThreshold = parse(Int, get(params, "fwLockThreshold", "0"))
+    fwLockMaxFrac = parse(Float64, get(params, "fwLockMaxFrac", "0.1"))
+    fwLockCap = parse(Int, get(params, "fwLockCap", "100"))
     timeLimit = parse(Float64, params["timeLimit"])
     alpha = parse(Float64, params["alpha"])
     alphaFactor = parse(Float64, params["alphaFactor"])
@@ -101,12 +104,28 @@ function buildFPFWConfig(params::Dict{String, String})
         error("Invalid fwMaxIterations: $fwMaxIterations. Must be a positive integer")
     end
 
-    if fwMaxStagnation < 0
-        error("Invalid fwMaxStagnation: $fwMaxStagnation. Must be >= 0 (0 disables the check)")
+    if fwStallMaxIters < 0
+        error("Invalid fwStallMaxIters: $fwStallMaxIters. Must be >= 0 (0 disables the check)")
     end
 
     if fwMinImprovement <= 0.0 || fwMinImprovement >= 1.0
         error("Invalid fwMinImprovement: $fwMinImprovement. Must be in (0, 1)")
+    end
+
+    if fwLockThreshold < 0
+        error("Invalid fwLockThreshold: $fwLockThreshold. Must be >= 0 (0 disables)")
+    end
+
+    if fwLockThreshold > 0 && !lmoWarmStart
+        error("fwLockThreshold requires lmoWarmStart=true — bound-locking needs the raw SCIP-LPI LMO")
+    end
+
+    if fwLockMaxFrac <= 0.0 || fwLockMaxFrac > 1.0
+        error("Invalid fwLockMaxFrac: $fwLockMaxFrac. Must be in (0, 1]")
+    end
+
+    if fwLockCap <= 0
+        error("Invalid fwLockCap: $fwLockCap. Must be > 0")
     end
 
     if alpha < 0.0 || alpha > 1.0
@@ -124,8 +143,11 @@ function buildFPFWConfig(params::Dict{String, String})
         fwMaxIterations = fwMaxIterations,
         fwStepSize = fwStepSize,
         fixedStepSize = fixedStepSize,
-        fwMaxStagnation = fwMaxStagnation,
+        fwStallMaxIters = fwStallMaxIters,
         fwMinImprovement = fwMinImprovement,
+        fwLockThreshold = fwLockThreshold,
+        fwLockMaxFrac = fwLockMaxFrac,
+        fwLockCap = fwLockCap,
         timeLimit = timeLimit,
         alpha = alpha,
         alphaFactor = alphaFactor,

@@ -38,26 +38,22 @@ function buildFWFunctions(
         ncols = length(xRound)
         nGInt = length(gIntIdx)
 
-        function binTerm(i, x)
-            if xRound[i] < 0.5
-                return x[i]
-            else
-                return 1.0 - x[i]
-            end
+        # |x_j - xRound_j| = gCoef[j] * x_j + xRound[j] on [0,1], where
+        # gCoef[j] = 1 - 2 * xRound[j] for binaries
+        gCoef = zeros(Float64, ncols)
+        for i in binIdx
+            gCoef[i] = 1.0 - 2.0 * xRound[i]
         end
+        binOffset = sum(xRound[i] for i in binIdx; init = 0.0)
 
         f = xExt -> begin
-            binDist = sum(binTerm(i, xExt) for i in binIdx; init = 0.0)
+            binDist = sum(gCoef[i] * xExt[i] for i in binIdx; init = 0.0) + binOffset
             gIntDist = sum(xExt[ncols + k] for k in 1:nGInt; init = 0.0)
             binDist + gIntDist
         end
 
         grad! = (storage, xExt) -> begin
-            storage .= 0.0
-            for i in binIdx
-                storage[i] = xRound[i] < 0.5 ? 1.0 : -1.0
-            end
-
+            storage[1:ncols] .= gCoef
             for k in 1:nGInt
                 storage[ncols + k] = 1.0
             end
@@ -140,6 +136,25 @@ function buildLineSearch(fwStepSize::Symbol, fixedStepSize::Float64=1.0)
         FrankWolfe.Adaptive()
     else
         error("Unknown line search: $fwStepSize. Choose from :unitary, :fixed, :agnostic, :backtracking, :secant, :adaptive")
+    end
+end
+
+# Callback for runFW: stop a projection early once dual_gap hasn't improved by `minImprovement`
+function buildStallCallback(patience::Int, minImprovement::Float64; debug::Bool=false)
+    stallCount = Ref(0)
+    bestGap = Ref(Inf)
+    return (state, args...) -> begin
+        gap = state.dual_gap
+        if gap < bestGap[] * (1 - minImprovement)
+            bestGap[] = gap
+            stallCount[] = 0
+        else
+            stallCount[] += 1
+        end
+        if debug
+            println("    [stall] t=$(state.t) step=$(state.step_type) dual_gap=$gap bestGap=$(bestGap[]) stallCount=$(stallCount[])")
+        end
+        return stallCount[] < patience
     end
 end
 

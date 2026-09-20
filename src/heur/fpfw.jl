@@ -36,10 +36,10 @@ end
 function stage1Complete(
     st::StageState,
     scip::Ptr{SCIP.SCIP_},
-    lp::LPInfo,
+    binIdx::Vector{Int},
     xFrac::Vector{Float64}
 )::Bool
-    return countFracVars(scip, lp.binIdx, xFrac) == 0 ||
+    return countFracVars(scip, binIdx, xFrac) == 0 ||
            st.stageIter >= DEF_STAGE1_MAX_ITER ||
            st.stage1NoImpr > DEF_STAGE1_NOIMPR_LIMIT
 end
@@ -75,47 +75,16 @@ function transitionToStage2!(
     st.consecutivePerturbs = 0
     st.transitioned = true
 
+    # LMO was just rebuilt, so locked bounds are already gone — reset tracking to match.
+    empty!(st.lockedIdx)
+    st.roundStableCount .= 0
+
     # Resume stage 2 from stage 1's closest projection and rounded point.
     xFrac .= st.closestFrac
     prevProj .= st.closestFrac
     st.closestDist = Inf
 
-    return nothing, f, grad!, dist
-end
-
-# Randomized feasibility probe: probabilistically round the current LP point xFrac several times and
-# submit each to SCIP. Returns true as soon as one is accepted, leaving the MIP-feasible point in xProbe.
-# Called at both stages with all integer constrained variables considered.
-function randFeasCheck!(
-    scip::Ptr{SCIP.SCIP_},
-    heur_ptr::Ptr{SCIP.SCIP_HEUR},
-    lp::LPInfo,
-    xFrac::Vector{Float64},
-    xProbe::Vector{Float64}
-)::Bool
-    k = count(i -> !isVarInteger(scip, xFrac[i]), lp.intIdx)
-
-    # Cap the nFrac to minimize randRound time
-    if k == 0 || k > DEF_RAND_FEAS_MAX_FRAC
-        return false
-    end
-
-    # Cap nProbes to 2^k, where k = # fractional integer vars
-    nProbes = min(DEF_RAND_FEAS_ITER_LIMIT, 1 << min(k, 10))
-
-    for _ in 1:nProbes
-        xProbe .= xFrac
-        for i in lp.intIdx
-            # Round up with probability xFrac[i] - floor(xFrac[i]), otherwise round down
-            frac = xFrac[i] - floor(xFrac[i])
-            xProbe[i] = rand() < frac ? ceil(xFrac[i]) : floor(xFrac[i])
-        end
-
-        if submitSolution(scip, heur_ptr, lp.lpCols, xProbe, lp.ncols)
-            return true
-        end
-    end
-    return false
+    return nothing, f, grad!, dist  # first return is for activeSet = nothing
 end
 
 # Projection using Frank-Wolfe
@@ -162,8 +131,8 @@ function fwProject(
     end
 
     # Build the callback for early termination if FW stagnates
-    callback = if config.fwMaxStagnation > 0
-        buildStallCallback(config.fwMaxStagnation, config.fwMinImprovement; debug=config.verbose >= 2)
+    callback = if config.fwStallMaxIters > 0
+        buildStallCallback(config.fwStallMaxIters, config.fwMinImprovement; debug=config.verbose >= 2)
     else
         nothing
     end
@@ -187,6 +156,7 @@ function fwProject(
     projObj = dist(xProj, xRound)  # pure distance to the rounding target
 
     fwIters = isempty(fwResult.traj_data) ? 0 : fwResult.traj_data[end][1]
+    fwGap = isempty(fwResult.traj_data) ? NaN : fwResult.traj_data[end][4]
 
     # Update the active set for warm-starting the next FW iteration (if enabled)
     if config.fwWarmStart && config.fwVariant !== :vanilla
@@ -195,7 +165,7 @@ function fwProject(
         newActiveSet = activeSet
     end
 
-    return xProj, projObj, fwIters, newActiveSet
+    return xProj, projObj, fwIters, fwGap, newActiveSet
 end
 
 # Main FPFW Heuristic Implementation
@@ -246,10 +216,10 @@ function SCIP.find_primal_solution(
     end
 
     # Per-stage state
-    if countFracVars(scip, binIdx, initSol) > 0
-        st = StageState(; stage=1, activeIntIdx=binIdx, activeGIntIdx=Int[], closestFrac=copy(initSol), closestRound=copy(initSol))
+    st = if countFracVars(scip, binIdx, initSol) > 0
+        StageState(; stage=1, activeIntIdx=binIdx, activeGIntIdx=Int[], closestFrac=copy(initSol), closestRound=copy(initSol), roundStableCount=zeros(Int, ncols))
     else
-        st = StageState(; stage=2, activeIntIdx=intIdx, activeGIntIdx=gIntIdx, closestFrac=copy(initSol), closestRound=copy(initSol))
+        StageState(; stage=2, activeIntIdx=intIdx, activeGIntIdx=gIntIdx, closestFrac=copy(initSol), closestRound=copy(initSol), roundStableCount=zeros(Int, ncols))
     end
 
     if config.verbose >= 2
@@ -298,7 +268,7 @@ function SCIP.find_primal_solution(
         end
 
         # Advance to stage 2 once stage 1 is done (binaries satisfied / iter cap / stalled)
-        if st.stage == 1 && stage1Complete(st, scip, lp, xFrac)
+        if st.stage == 1 && stage1Complete(st, scip, lp.binIdx, xFrac)
             activeSet, f, grad!, dist = transitionToStage2!(st, scip, config, data, lp,
                                                             xRound, xFrac, prevProj, visitedRounded)
         end
@@ -424,6 +394,7 @@ function SCIP.find_primal_solution(
             repeatRound = h == st.prevHash || h in visitedRounded
 
             st.prevHash = h
+            updateLockState!(scip, st, config, data.lmo, xRound, prevRound, stats, ncols)
             prevRound .= xRound
             push!(visitedRounded, h)
         else
@@ -460,6 +431,7 @@ function SCIP.find_primal_solution(
                     end
                 end
             end
+            updateLockState!(scip, st, config, data.lmo, xRound, prevRound, stats, ncols)
             prevRound .= xRound
         end
 
@@ -529,28 +501,71 @@ function SCIP.find_primal_solution(
         end
         
         fwStartTime = time()
+        simplexItersBefore = data.lmo.simplexIters[]
 
         # Bound the LMO's own LP solves to what's left of the budget, so a single slow LP can't run unbounded
         data.lmo.deadline[] = time() + remainingTime
 
-        # Pre-declared: a `try` block inside a `while` loop is its own scope in Julia, so
-        # first-assigning these inside the try below would not be visible after it.
-        local xProj, projObj, fwIters
-        try
-            xProj, projObj, fwIters, activeSet = fwProject(
-                config, fOFP, gradOFP!, dist, data.lmo, xFrac, xRound, st.activeGIntIdx, st.activeIntIdx,
-                activeSet, prevGrad, ncols, remainingTime
-            )
-        catch e
-            e isa LMODeadlineExceeded || rethrow()
+        local xProj, projObj, fwIters, fwGap
+        deadlineExceeded = false
+        solverError = false
+        for attempt in 1:2
+            try
+                xProj, projObj, fwIters, fwGap, activeSet = fwProject(
+                    config, fOFP, gradOFP!, dist, data.lmo, xFrac, xRound, st.activeGIntIdx, st.activeIntIdx,
+                    activeSet, prevGrad, ncols, remainingTime
+                )
+                # Solve just succeeded with nothing locked: save this basis as the retry fallback.
+                if isempty(st.lockedIdx)
+                    cstat, rstat = LPIgetLMOBase(data.lmo)
+                    data.lmo.fallbackCstat[] = cstat
+                    data.lmo.fallbackRstat[] = rstat
+                end
+                break
+            catch e
+                if e isa LMODeadlineExceeded
+                    deadlineExceeded = true
+                    break
+                elseif e isa LMOSolverError
+                    # Solver error: give up cleanly instead of crashing
+                    solverError = true
+                    break
+                elseif e isa LMOPrimalInfeasible && attempt == 1
+                    # Unlock everything and reset the warm-start basis to the fallback, then retry.
+                    unlockAll!(st, data.lmo)
+                    if !isempty(data.lmo.fallbackCstat[])
+                        LPIsetBase(data.lmo, data.lmo.fallbackCstat[], data.lmo.fallbackRstat[])
+                    end
+                    stats.lockInfeasibleRetries += 1
+                else
+                    # LMOPrimalInfeasible in 2nd attempt: genuinely infeasible, not just a bad warm start
+                    rethrow()
+                end
+            end
+        end
+
+        if deadlineExceeded
             stats.fwTime += timeElapsed(fwStartTime)
+            stats.lmoSimplexIters += data.lmo.simplexIters[] - simplexItersBefore
             stats.exitReason = TIME_LIMIT
+            break
+        end
+
+        if solverError
+            stats.fwTime += timeElapsed(fwStartTime)
+            stats.lmoSimplexIters += data.lmo.simplexIters[] - simplexItersBefore
+            stats.exitReason = INFEASIBLE_FW
             break
         end
 
         # Update FW stats
         stats.fwTime += timeElapsed(fwStartTime)
         stats.fwIterations += fwIters
+        stats.lmoSimplexIters += data.lmo.simplexIters[] - simplexItersBefore
+        if !isnan(fwGap)
+            stats.sumFwGap += fwGap
+            stats.fwGapSamples += 1
+        end
 
         if config.verbose >= 4
             println("   xProj = $(xProj[st.activeIntIdx])")
@@ -565,7 +580,7 @@ function SCIP.find_primal_solution(
         # Safety check: FW must always return a feasible point (LP polytope is preserved)
         if !isSolutionLPFeasible(scip, lpRows, lpCols, xProj, colDict)
             stats.exitReason = INFEASIBLE_FW
-            logIteration(config, pumpDisplay, stats, st.stage, alpha, origObj, projObj, step, nFrac, fwIters,
+            logIteration(config, pumpDisplay, stats, st.stage, alpha, origObj, projObj, step, nFrac, fwIters, fwGap,
                 iterTime, heurStartTime, flips, perturbed, restarted, "infeasibleFW", "infeasibleFW")
             break
         end
@@ -600,16 +615,16 @@ function SCIP.find_primal_solution(
         if isSolutionIntegral(scip, xProj, intIdx)
             if submitSolution(scip, heur_ptr, lpCols, xProj, ncols)
                 result = recordSolutionFound!(stats, SOLUTION_FWPROJ, scip, heurStartTime)
-                logIteration(config, pumpDisplay, stats, st.stage, alpha, origObj, projObj, step, nFrac, fwIters,
+                logIteration(config, pumpDisplay, stats, st.stage, alpha, origObj, projObj, step, nFrac, fwIters, fwGap,
                     iterTime, heurStartTime, flips, perturbed, restarted, "feasFWProj", "accepted")
 
                 break
             else  # if SCIP rejects the solution, continue
-                logIteration(config, pumpDisplay, stats, st.stage, alpha, origObj, projObj, step, nFrac, fwIters,
+                logIteration(config, pumpDisplay, stats, st.stage, alpha, origObj, projObj, step, nFrac, fwIters, fwGap,
                     iterTime, heurStartTime, flips, perturbed, restarted, "rejected", "rejected")
             end
         else  # if xProj is not integral, continue to the next iteration
-            logIteration(config, pumpDisplay, stats, st.stage, alpha, origObj, projObj, step, nFrac, fwIters,
+            logIteration(config, pumpDisplay, stats, st.stage, alpha, origObj, projObj, step, nFrac, fwIters, fwGap,
                 iterTime, heurStartTime, flips, perturbed, restarted, "", "continuing")
         end
 

@@ -4,21 +4,19 @@ A struct that holds the configuration parameters for the FPFW heuristic.
 The fields can be set via a configuration file or command-line arguments.
 """
 @kwdef struct FPFWConfig
+    # --- General ---
     "name of the run"
     runName::String = "fpfw"
-    "norm used for the projection step"
-    norm::Symbol = :manhattan
-    "variant of the Frank-Wolfe algorithm"
-    fwVariant::Symbol = :vanilla
-    "maximum number of iterations for the Frank-Wolfe algorithm"
-    fwMaxIterations::Int = 1
-    "step size strategy for the Frank-Wolfe algorithm"
-    fwStepSize::Symbol = :unitary
-    "constant step size gamma used only when fwStepSize == :fixed (curvature-free, so
-    safe with a non-smooth norm like manhattan, unlike :adaptive/:secant/:backtracking)"
-    fixedStepSize::Float64 = 0.5
     "time budget in seconds for the FPFW heuristic only"
     timeLimit::Float64 = 300.0
+    "apply presolving to the original problem before running the heuristic"
+    presolve::Bool = true
+    "random seed for reproducibility"
+    seed::Int = 42
+    "verbosity level (0: summary only, 1: pump table, 2: per-iteration debug, 3: iteration diagnostics)"
+    verbose::Int = 0
+
+    # --- Feasibility Pump ---
     "objective weight for objective feasibility pump"
     alpha::Float64 = DEF_ALPHA
     "geometric decay factor applied to alpha each pump iteration"
@@ -31,23 +29,36 @@ The fields can be set via a configuration file or command-line arguments.
     "WalkSAT perturb: when there aren't enough fractional variables to flip,
     pull extras from the support of currently-violated LP rows"
     walksatPerturb::Bool = true
+    "fallback each iteration: when xRound isn't accepted, fix integers to xRound and
+    solve the LP to recover feasible continuous values"
+    useDive::Bool = false
+
+    # --- Frank-Wolfe ---
+    "norm used for the projection step"
+    norm::Symbol = :manhattan
+    "variant of the Frank-Wolfe algorithm"
+    fwVariant::Symbol = :vanilla
+    "maximum number of iterations for the Frank-Wolfe algorithm"
+    fwMaxIterations::Int = 1
+    "step size strategy for the Frank-Wolfe algorithm"
+    fwStepSize::Symbol = :unitary
+    "constant step size gamma used only when fwStepSize == :fixed (curvature-free, so
+    safe with a non-smooth norm like manhattan, unlike :adaptive/:secant/:backtracking)"
+    fixedStepSize::Float64 = 0.5
     "warm start the active set for the Frank-Wolfe algorithm"
     fwWarmStart::Bool = false
     "use the raw SCIP-LPI LMO and seed its basis from SCIP's LP basis (vs the MOI-based LMO)"
     lmoWarmStart::Bool = true
-    "fallback each iteration: when xRound isn't accepted, fix integers to xRound and
-    solve the LP to recover feasible continuous values"
-    useDive::Bool = false
-    "apply presolving to the original problem before running the heuristic"
-    presolve::Bool = true
-    "random seed for reproducibility"
-    seed::Int = 42
-    "verbosity level (0: summary only, 1: pump table, 2: per-iteration debug, 3: iteration diagnostics)"
-    verbose::Int = 0
     "stop a FW projection early after this many non-improving dual_gap steps in a row; 0 disables"
-    fwMaxStagnation::Int = DEF_FW_MAX_STAGNATION
-    "relative dual_gap improvement needed to reset fwMaxStagnation's counter"
+    fwStallMaxIters::Int = DEF_FW_STALL_MAX_ITERS
+    "relative dual_gap improvement needed to reset fwStallMaxIters's counter"
     fwMinImprovement::Float64 = DEF_FW_MIN_IMPROVEMENT
+    "consecutive stable pump iterations before a smooth-norm variable's LMO bounds get locked; 0 disables"
+    fwLockThreshold::Int = DEF_FW_LOCK_THRESHOLD
+    "max fraction of ncols newly locked per pump iteration"
+    fwLockMaxFrac::Float64 = DEF_FW_LOCK_MAX_FRAC
+    "absolute ceiling on new locks per iteration, regardless of ncols"
+    fwLockCap::Int = DEF_FW_LOCK_CAP
 end
 
 """
@@ -88,8 +99,7 @@ Used for logging and reporting purposes.
     primalIntegral::Float64 = 0.0
     primalEvents::Vector{Tuple{Float64, Float64}} = Tuple{Float64, Float64}[]
 
-    "time breakdown in seconds: total solve, SCIP's own time before the heuristic was called (reading, presolve, root LP),
-    heuristic wall time, randomized feasibility-check time, FW-solve time, diveSolve LP time, LMO build time"
+    "time tracking in seconds"    
     totalTime::Float64 = 0.0
     rootTime::Float64 = 0.0
     heurTime::Float64 = 0.0
@@ -101,6 +111,17 @@ Used for logging and reporting purposes.
     "iteration statistics"
     pumpIterations::Int = 0
     fwIterations::Int = 0
+    lmoSimplexIters::Int = 0
+
+    "FW dual-gap tracking: sum/count of the final dual_gap reached by each FW-projection call, for a per-solve mean"
+    sumFwGap::Float64 = 0.0
+    fwGapSamples::Int = 0
+
+    "lock-feature statistics"
+    lockVarsPeak::Int = 0
+    lockInfeasibleRetries::Int = 0
+    lockRejected::Int = 0
+    lockCheckSimplexIters::Int = 0
     
     "times randFeasCheck! / diveSolve were called"
     rfcCalls::Int = 0
@@ -126,22 +147,46 @@ LPILMO
 A struct that implements a linear minimization oracle (LMO) for the 
 Frank-Wolfe algorithm using SCIP's LPI interface.
 """
-struct LPILMO <: FrankWolfe.LinearMinimizationOracle
+@kwdef struct LPILMO <: FrankWolfe.LinearMinimizationOracle
+    "LPI pointer"
     lpi::Ptr{SCIP.SCIP_LPI}
+    "number of columns and rows in the LMO"
     ncols::Int32
-    nrows::Int32      # total rows (original LP rows + manhattan aux rows, if any)
-    origNrows::Int32  # original LP row count, before the manhattan aux block
+    nrows::Int32
+    "original LP row count, LB, and UB before the manhattan aux block"
+    origNrows::Int32
+    origLb::Vector{Float64}
+    origUb::Vector{Float64}
+    "verbosity level"
     verbose::Int
-    deadline::Base.RefValue{Float64}  # time() value by which the current LP solve must give up; Inf = no limit
+    "deadline to stop the current LP solve"
+    deadline::Base.RefValue{Float64}
+    "cumulative dual-simplex iterations"
+    simplexIters::Base.RefValue{Int}
+    "most recent viable basis seen right after a real solve with no locks active"
+    fallbackCstat::Base.RefValue{Vector{Cint}}
+    fallbackRstat::Base.RefValue{Vector{Cint}}
 end
 
 """
 LMODeadlineExceeded
-Thrown by `compute_extreme_point` when a single LP solve is cut off by `LPILMO.deadline`
-before finishing, so the caller can treat it as a clean time-limit exit instead of the
-solve failing to reach primal feasibility.
+Thrown when an LP solve runs past its deadline. Caller treats it as a clean time-limit exit.
 """
 struct LMODeadlineExceeded <: Exception end
+
+"""
+LMOPrimalInfeasible
+Thrown when the LP solve finds no feasible point — usually locked variables clashing.
+Caller unlocks everything and retries once.
+"""
+struct LMOPrimalInfeasible <: Exception end
+
+"""
+LMOSolverError
+Thrown when the solver itself errors (SCIP_LPERROR), not a real infeasibility.
+Caller gives up on this projection cleanly instead of crashing.
+"""
+struct LMOSolverError <: Exception end
 
 """
 StageState
@@ -182,6 +227,10 @@ except `stage1NoImpr`, which is a stage-1-only signal and is never reset on tran
     closestRound::Vector{Float64}
     "set by transitionToStage2!, cleared after one iteration: the next rounding targets closestRound"
     transitioned::Bool = false
+    "consecutive stable pump iterations per variable (xRound[i] unchanged)"
+    roundStableCount::Vector{Int}
+    "variables currently locked (lb=ub=xRound[i]) in the LMO"
+    lockedIdx::Set{Int} = Set{Int}()
 end
 
 """
@@ -201,7 +250,7 @@ received from getLPInfo function in src/scip/queries.jl
     colDict::Dict{Ptr{SCIP.SCIP_COL}, Int}
     "indices of binary variables"
     binIdx::Vector{Int}
-    "binIdx as a Set, for O(1) membership tests"
+    "binIdx as a Set, for O(1) lookup"
     binSet::Set{Int}
     "indices of general integer variables"
     gIntIdx::Vector{Int}

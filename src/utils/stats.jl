@@ -88,9 +88,14 @@ function printConfigs(config::FPFWConfig)
     if config.fwStepSize == :fixed
         println("fixedStepSize = $(config.fixedStepSize)")
     end
-    println("fwMaxStagnation = $(config.fwMaxStagnation)")
-    if config.fwMaxStagnation > 0
+    println("fwStallMaxIters = $(config.fwStallMaxIters)")
+    if config.fwStallMaxIters > 0
         println("fwMinImprovement = $(config.fwMinImprovement)")
+    end
+    println("fwLockThreshold = $(config.fwLockThreshold)")
+    if config.fwLockThreshold > 0
+        println("fwLockMaxFrac = $(config.fwLockMaxFrac)")
+        println("fwLockCap = $(config.fwLockCap)")
     end
     println("timeLimit = $(config.timeLimit)")
     println("alpha = $(config.alpha)")
@@ -158,6 +163,13 @@ function printResults(stats::FPFWStats)
         println("diveCalls = $(stats.diveCalls)")
         println("roundSubmits = $(stats.roundSubmits)")
         println("fwIterations = $(stats.fwIterations)")
+        avgFwGapStr = stats.fwGapSamples > 0 ? @sprintf("%.6g", stats.sumFwGap / stats.fwGapSamples) : "n/a"
+        println("avgFwGap = $avgFwGapStr")
+        println("lmoSimplexIters = $(stats.lmoSimplexIters)")
+        println("lockVarsPeak = $(stats.lockVarsPeak)")
+        println("lockInfeasibleRetries = $(stats.lockInfeasibleRetries)")
+        println("lockRejected = $(stats.lockRejected)")
+        println("lockCheckSimplexIters = $(stats.lockCheckSimplexIters)")
         println("perturbCount = $(stats.perturbCount)")
         println("restartCount = $(stats.restartCount)")
         println("walksatCount = $(stats.walksatCount)")
@@ -188,6 +200,12 @@ function writeResults(stats::FPFWStats, config::FPFWConfig, fileName::String, re
         "roundSubmits" => stats.roundSubmits,
         "pumpIterations" => stats.pumpIterations,
         "fwIterations" => stats.fwIterations,
+        "avgFwGap" => stats.fwGapSamples > 0 ? stats.sumFwGap / stats.fwGapSamples : nothing,
+        "lmoSimplexIters" => stats.lmoSimplexIters,
+        "lockVarsPeak" => stats.lockVarsPeak,
+        "lockInfeasibleRetries" => stats.lockInfeasibleRetries,
+        "lockRejected" => stats.lockRejected,
+        "lockCheckSimplexIters" => stats.lockCheckSimplexIters,
         "perturbCount" => stats.perturbCount,
         "restartCount" => stats.restartCount,
         "walksatCount" => stats.walksatCount,

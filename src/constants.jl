@@ -23,13 +23,18 @@ const DEF_MIN_GINT_FLIP_CAP = 10   # Floor for the restart flip-count cap
 const DEF_MAX_RES_RETRIES = 10     # Re-restart until the rounded point is changed, at most this many times
 
 # Objective Feasibility Pump parameters
-const DEF_ALPHA = 0.0  # initial objective weight
-const DEF_ALPHA_FACTOR = 0.9  # geometric decay per iteration
-const DEF_ALPHA_MIN = 1e-4  # alpha at or below this snaps to 0
+const DEF_ALPHA = 0.0          # initial objective weight
+const DEF_ALPHA_FACTOR = 0.9   # geometric decay per iteration
+const DEF_ALPHA_MIN = 1e-4     # alpha at or below this snaps to 0
 
 # FW stall-detection (inner-loop analogue of DEF_MIN_IMPROVEMENT/MAX_STAGNATION above)
-const DEF_FW_MAX_STAGNATION = 0  # consecutive non-improving FW steps before giving up early; 0 disables
+const DEF_FW_STALL_MAX_ITERS = 0  # consecutive non-improving FW steps before giving up early; 0 disables
 const DEF_FW_MIN_IMPROVEMENT = 0.10  # relative dual_gap improvement needed to reset the counter
+
+# Lock-eligible variables (per-variable, pump-level analogue of the stall-detection pair above)
+const DEF_FW_LOCK_THRESHOLD = 0  # consecutive stable pump iterations before a variable's LMO bounds get locked; 0 disables
+const DEF_FW_LOCK_MAX_FRAC = 0.1  # max fraction of ncols newly locked per pump iteration
+const DEF_FW_LOCK_CAP = 100  # absolute ceiling on new locks per iteration, regardless of ncols
 
 # Staging parameters
 const DEF_STAGE1_MAX_ITER = 10000

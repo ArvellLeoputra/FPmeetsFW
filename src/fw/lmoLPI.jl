@@ -167,7 +167,19 @@ function buildLPILMO(
             stage, nlmoCols, ncols, nGInt, nlmoRows, nrows, 2 * nGInt)
     end
 
-    return LPILMO(lpi, nlmoCols, nlmoRows, nrows, verbose, Ref(Inf))
+    return LPILMO(;
+        lpi,
+        ncols=nlmoCols,
+        nrows=nlmoRows,
+        origNrows=nrows,
+        origLb=copy(lb),
+        origUb=copy(ub),
+        verbose,
+        deadline=Ref(Inf),
+        simplexIters=Ref(0),
+        fallbackCstat=Ref(Cint[]),
+        fallbackRstat=Ref(Cint[])
+    )
 end
 
 # Update the rounding values in the LMO's LPI
@@ -188,22 +200,67 @@ function LPIupdateRounding!(lmo::LPILMO, gIntIdx::Vector{Int}, xRound::Vector{Fl
     SCIP.@SCIP_CALL SCIP.SCIPlpiChgSides(lmo.lpi, Cint(nAuxRows), ind, lhs, rhs)
 end
 
+# Lock variables to a fixed value (lb=ub=values[k]) in the LMO's LPI
+function LPIlockVars!(lmo::LPILMO, colIdxs::Vector{Int}, values::Vector{Float64})
+    ind = Cint.(colIdxs .- 1)  # adjust to 0-based indexing for SCIP's C interface
+    SCIP.@SCIP_CALL SCIP.SCIPlpiChgBounds(lmo.lpi, Cint(length(colIdxs)), ind, values, values)
+end
+
+# Restore a previously locked variable's original bounds
+function LPIunlockVars!(lmo::LPILMO, colIdxs::Vector{Int})
+    ind = Cint.(colIdxs .- 1)
+    lb = [lmo.origLb[i] for i in colIdxs]
+    ub = [lmo.origUb[i] for i in colIdxs]
+    SCIP.@SCIP_CALL SCIP.SCIPlpiChgBounds(lmo.lpi, Cint(length(colIdxs)), ind, lb, ub)
+end
+
+# Check the LMO's feasibility after locking a variable
+function LPIcheckFeasible!(lmo::LPILMO)::Bool
+    lpTimeLeft = min(DEF_SCIP_TIME_LIMIT, max(1e-3, lmo.deadline[] - time()))
+    SCIP.@SCIP_CALL SCIP.SCIPlpiSetRealpar(lmo.lpi, SCIP.SCIP_LPPAR_LPTILIM, lpTimeLeft)
+
+    # Checked by hand, not @SCIP_CALL, so a genuine solver glitch (SCIP_LPERROR) is catchable
+    # instead of crashing the whole run — same reasoning as compute_extreme_point.
+    retcode = SCIP.SCIPlpiSolveDual(lmo.lpi)
+    if retcode == SCIP.SCIP_LPERROR
+        throw(LMOSolverError())
+    elseif retcode != SCIP.SCIP_OKAY
+        error("SCIP.SCIPlpiSolveDual(lmo.lpi) yielded SCIP code $retcode")
+    end
+
+    if SCIP.SCIPlpiIsTimelimExc(lmo.lpi) == SCIP.TRUE
+        throw(LMODeadlineExceeded())
+    end
+
+    simplexIter = Ref{Cint}(0)
+    SCIP.@SCIP_CALL SCIP.SCIPlpiGetIterations(lmo.lpi, simplexIter)
+    lmo.simplexIters[] += simplexIter[]
+
+    return SCIP.SCIPlpiIsPrimalFeasible(lmo.lpi) == SCIP.TRUE
+end
+
+# Read a basis from any given LPI
+function LPIgetBaseFrom(lpi::Ptr{SCIP.SCIP_LPI}, ncols::Int32, nrows::Int32)
+    cstat = zeros(Cint, ncols)
+    rstat = zeros(Cint, nrows)
+    SCIP.@SCIP_CALL SCIP.SCIPlpiGetBase(lpi, cstat, rstat)
+    return cstat, rstat
+end
+
+# Read the LMO's own current basis
+function LPIgetLMOBase(lmo::LPILMO)
+    return LPIgetBaseFrom(lmo.lpi, lmo.ncols, lmo.nrows)
+end
+
 # Extract LP basis from SCIP's internal LP solver
 function LPIgetBase(scip::Ptr{SCIP.SCIP_}, ncols::Int32, nrows::Int32)
-    # Get SCIP's internal LP handle
     lpiPtr = Ref{Ptr{SCIP.SCIP_LPI}}(C_NULL)
     SCIP.@SCIP_CALL SCIP.SCIPgetLPI(scip, lpiPtr)
     lpi = lpiPtr[]
 
-    isOptimal = SCIP.SCIPlpiIsOptimal(lpi)
-    @assert isOptimal == SCIP.TRUE "LPI is not optimal"
+    @assert SCIP.SCIPlpiIsOptimal(lpi) == SCIP.TRUE "LPI is not optimal"
 
-    # Extract current LP basis
-    cstat = zeros(Cint, ncols)
-    rstat = zeros(Cint, nrows)
-    SCIP.@SCIP_CALL SCIP.SCIPlpiGetBase(lpi, cstat, rstat)
-
-    return cstat, rstat
+    return LPIgetBaseFrom(lpi, ncols, nrows)
 end
 
 # Set LP basis
@@ -215,14 +272,17 @@ end
 function LPIinitBase(scip::Ptr{SCIP.SCIP_}, lmo::LPILMO, ncols::Int32, nrows::Int32)
     cstatOrig, rstatOrig = LPIgetBase(scip, ncols, nrows)
     if lmo.ncols == ncols && lmo.nrows == nrows
-        LPIsetBase(lmo, cstatOrig, rstatOrig)
+        cstat, rstat = cstatOrig, rstatOrig
     else
         cstat = zeros(Cint, lmo.ncols)
         cstat[1:ncols] .= cstatOrig
         rstat = ones(Cint, lmo.nrows)
         rstat[1:nrows] .= rstatOrig
-        LPIsetBase(lmo, cstat, rstat)
     end
+    LPIsetBase(lmo, cstat, rstat)
+    # Track the basis to fallback in case of infeasibility in the LMO's LPI after locking variables
+    lmo.fallbackCstat[] = cstat
+    lmo.fallbackRstat[] = rstat
 end
 
 # Compute the extreme point of the LMO's polytope in the direction of the given gradient
@@ -237,18 +297,21 @@ function FrankWolfe.compute_extreme_point(lmo::LPILMO, direction::AbstractVector
     )
 
     # Capture the basis before solving
-    nrowsRef = Ref{Cint}(0)
-    SCIP.SCIPlpiGetNRows(lmo.lpi, nrowsRef)
-    cstatBefore = zeros(Cint, lmo.ncols)
-    rstatBefore = zeros(Cint, nrowsRef[])
-    SCIP.SCIPlpiGetBase(lmo.lpi, cstatBefore, rstatBefore)
+    cstatBefore, rstatBefore = LPIgetLMOBase(lmo)
 
     # Time limit setting, floored at 1ms, instead of 0, to avoid no limit for time limit.
     lpTimeLeft = min(DEF_SCIP_TIME_LIMIT, max(1e-3, lmo.deadline[] - time()))
     SCIP.@SCIP_CALL SCIP.SCIPlpiSetRealpar(lmo.lpi, SCIP.SCIP_LPPAR_LPTILIM, lpTimeLeft)
 
-    # Solve with dual simplex
-    SCIP.@SCIP_CALL SCIP.SCIPlpiSolveDual(lmo.lpi)
+    # Solve with dual simplex. Checked by hand (not @SCIP_CALL) so a genuine solver glitch
+    # (SCIP_LPERROR — numerical failure, distinct from infeasible or timed-out) can be turned
+    # into a catchable exception instead of crashing the whole run.
+    retcode = SCIP.SCIPlpiSolveDual(lmo.lpi)
+    if retcode == SCIP.SCIP_LPERROR
+        throw(LMOSolverError())
+    elseif retcode != SCIP.SCIP_OKAY
+        error("SCIP.SCIPlpiSolveDual(lmo.lpi) yielded SCIP code $retcode")
+    end
 
     # Check if time limit was reached
     if SCIP.SCIPlpiIsTimelimExc(lmo.lpi) == SCIP.TRUE
@@ -257,6 +320,7 @@ function FrankWolfe.compute_extreme_point(lmo::LPILMO, direction::AbstractVector
 
     simplexIter = Ref{Cint}(0)
     SCIP.@SCIP_CALL SCIP.SCIPlpiGetIterations(lmo.lpi, simplexIter)
+    lmo.simplexIters[] += simplexIter[]
 
     # Per-solve basis diagnostics are fine-grained (level 3); skip if no simplex iterations were performed
     verbosed = lmo.verbose >= 2 && simplexIter[] > 0
@@ -268,9 +332,7 @@ function FrankWolfe.compute_extreme_point(lmo::LPILMO, direction::AbstractVector
             count(==(0), cstatBefore), count(==(1), cstatBefore), count(==(2), cstatBefore),
             count(==(0), rstatBefore), count(==(1), rstatBefore), count(==(2), rstatBefore))
 
-        cstat = zeros(Cint, lmo.ncols)
-        rstat = zeros(Cint, nrowsRef[])
-        SCIP.SCIPlpiGetBase(lmo.lpi, cstat, rstat)
+        cstat, rstat = LPIgetLMOBase(lmo)
 
         @printf("LMO basis after solve: cstat L=%d B=%d U=%d | rstat L=%d B=%d U=%d iters=%d\n",
             count(==(0), cstat), count(==(1), cstat), count(==(2), cstat),
@@ -296,6 +358,6 @@ function FrankWolfe.compute_extreme_point(lmo::LPILMO, direction::AbstractVector
 
         return solVector
     else
-        error("LPILMO: LP not primal feasible after dual simplex solve")
+        throw(LMOPrimalInfeasible())
     end
 end

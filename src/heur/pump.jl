@@ -26,27 +26,8 @@ function roundSolution!(
 end
 
 # Hash function for cycle detection (only hashes integer variable values)
-function hashRounded(x::Vector{Float64}, intIdx::Vector{Int})
-    hash(tuple((x[i] for i in intIdx)...))
-end
-
-# Callback for runFW: stop a projection early once dual_gap hasn't improved by `minImprovement`
-function buildStallCallback(patience::Int, minImprovement::Float64; debug::Bool=false)
-    stallCount = Ref(0)
-    bestGap = Ref(Inf)
-    return (state, args...) -> begin
-        gap = state.dual_gap
-        if gap < bestGap[] * (1 - minImprovement)
-            bestGap[] = gap
-            stallCount[] = 0
-        else
-            stallCount[] += 1
-        end
-        if debug
-            println("    [stall] t=$(state.t) step=$(state.step_type) dual_gap=$gap bestGap=$(bestGap[]) stallCount=$(stallCount[])")
-        end
-        return stallCount[] < patience
-    end
+function hashRounded(xRound::Vector{Float64}, intIdx::Vector{Int})
+    return hash(Int.(xRound[intIdx]))
 end
 
 # Compute the support of the violated constraints in the LP, restricted to eligible variables
@@ -96,7 +77,7 @@ end
 function flipRounded!(
     scip::Ptr{SCIP.SCIP_},
     xRound::Vector{Float64},
-    x::Vector{Float64},
+    xFrac::Vector{Float64},
     i::Int,
     binSet::Set{Int},
     lpCols::Vector{Ptr{SCIP.SCIP_COL}}
@@ -117,10 +98,10 @@ function flipRounded!(
     elseif SCIP.SCIPisFeasEQ(scip, xRound[i], ub) == SCIP.TRUE
         xRound[i] -= 1.0
     # Case 3: xRound[i] is an interior point and lower than its fractional point
-    elseif SCIP.SCIPisFeasLT(scip, xRound[i], x[i]) == SCIP.TRUE
+    elseif SCIP.SCIPisFeasLT(scip, xRound[i], xFrac[i]) == SCIP.TRUE
         xRound[i] += 1.0
     # Case 4: xRound[i] is an interior point and higher than its fractional point
-    elseif SCIP.SCIPisFeasGT(scip, xRound[i], x[i]) == SCIP.TRUE
+    elseif SCIP.SCIPisFeasGT(scip, xRound[i], xFrac[i]) == SCIP.TRUE
         xRound[i] -= 1.0
     # Case 5: xRound[i] is an interior point and exactly at its fractional point
     else
@@ -131,7 +112,7 @@ end
 function perturb(
     scip::Ptr{SCIP.SCIP_},
     xRound::Vector{Float64},
-    x::Vector{Float64},
+    xFrac::Vector{Float64},
     lp::LPInfo,
     st::StageState,
     config::FPFWConfig,
@@ -142,8 +123,8 @@ function perturb(
     # Identify the fractional variables in the current rounded solution
     fracVars = Tuple{Float64, Int}[]
     for i in activeIntIdx
-        if SCIP.SCIPisFeasEQ(scip, xRound[i], x[i]) == SCIP.FALSE
-            roundDist = round(abs(xRound[i] - x[i]), digits=6)
+        if SCIP.SCIPisFeasEQ(scip, xRound[i], xFrac[i]) == SCIP.FALSE
+            roundDist = round(abs(xRound[i] - xFrac[i]), digits=6)
             push!(fracVars, (roundDist, i))
         end
     end
@@ -163,8 +144,8 @@ function perturb(
         nFracFlips = clamp(nFlips, 1, length(fracVars))
     end
 
-    # WalkSAT perturbation: if there are too few fractional variables to reach flip target (nFlips),
-    # fill the flip set with  a random subset of the integer variables appearing in violated constraints.
+    # WalkSAT perturbation: if there are too few fractional variables to reach the flip target,
+    # fill the rest with a random subset of the variables appearing in violated constraints.
     varsToFlip = fracVars[1:nFracFlips]
     if config.walksatPerturb && nFracFlips < nFlips
         nNeeded = nFlips - nFracFlips
@@ -196,7 +177,7 @@ function perturb(
 
     # Flip the selected variables
     for (_, i) in varsToFlip
-        flipRounded!(scip, xRound, x, i, lp.binSet, lp.lpCols)
+        flipRounded!(scip, xRound, xFrac, i, lp.binSet, lp.lpCols)
     end
 
     return length(varsToFlip), nWalksat
@@ -229,12 +210,12 @@ end
 function restart(
     scip::Ptr{SCIP.SCIP_},
     xRound::Vector{Float64},
-    x::Vector{Float64},
+    xFrac::Vector{Float64},
     prevRound::Vector{Float64},
     lp::LPInfo,
     st::StageState,
     config::FPFWConfig,
-    data::FPFWRunData,
+    data::FPFWRunData
 )::Int
     activeGIntIdx = st.activeGIntIdx
     avgFlips = st.avgFlips
@@ -244,7 +225,7 @@ function restart(
     for i in lp.binIdx
         r = rand() - 0.47  # [-0.47, 0.53)
         if r > 0 && SCIP.SCIPisFeasEQ(scip, xRound[i], prevRound[i]) == SCIP.TRUE  # stuck variable
-            roundDist = abs(xRound[i] - x[i])
+            roundDist = abs(xRound[i] - xFrac[i])
             if roundDist + r > 0.5
                 xRound[i] = 1.0 - xRound[i]
                 changed += 1
@@ -295,4 +276,39 @@ function restart(
     end
 
     return changed
+end
+
+# Randomized feasibility probe: probabilistically round the current LP point xFrac several times and
+# submit each to SCIP. Returns true as soon as one is accepted, leaving the MIP-feasible point in xProbe.
+# Called at both stages with all integer constrained variables considered.
+function randFeasCheck!(
+    scip::Ptr{SCIP.SCIP_},
+    heur_ptr::Ptr{SCIP.SCIP_HEUR},
+    lp::LPInfo,
+    xFrac::Vector{Float64},
+    xProbe::Vector{Float64}
+)::Bool
+    k = count(i -> !isVarInteger(scip, xFrac[i]), lp.intIdx)
+
+    # Cap the nFrac to minimize randRound time
+    if k == 0 || k > DEF_RAND_FEAS_MAX_FRAC
+        return false
+    end
+
+    # Cap nProbes to 2^k, where k = # fractional integer vars
+    nProbes = min(DEF_RAND_FEAS_ITER_LIMIT, 1 << min(k, 10))
+
+    for _ in 1:nProbes
+        xProbe .= xFrac
+        for i in lp.intIdx
+            # Round up with probability xFrac[i] - floor(xFrac[i]), otherwise round down
+            frac = xFrac[i] - floor(xFrac[i])
+            xProbe[i] = rand() < frac ? ceil(xFrac[i]) : floor(xFrac[i])
+        end
+
+        if submitSolution(scip, heur_ptr, lp.lpCols, xProbe, lp.ncols)
+            return true
+        end
+    end
+    return false
 end
