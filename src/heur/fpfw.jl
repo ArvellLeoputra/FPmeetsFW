@@ -197,6 +197,10 @@ function SCIP.find_primal_solution(
 
     data.called += 1
 
+    if config.scipTimeLimit > 0
+        SCIP.@SCIP_CALL SCIP.SCIPsetRealParam(scip, "limits/time", SCIP.SCIPgetSolvingTime(scip) + config.timeLimit)
+    end
+
     # Time tracking
     heurStartTime = time()
     rootTime = SCIP.SCIPgetSolvingTime(scip)
@@ -315,7 +319,12 @@ function SCIP.find_primal_solution(
             roundSolution!(xRound, st.closestRound, gIntIdx, config.randRound)
             st.transitioned = false
         else
-            roundSolution!(xRound, xFrac, st.activeIntIdx, config.randRound)
+            if config.fwActiveSetRound && activeSet !== nothing && !isempty(activeSet.atoms)
+                roundSolution!(xRound, sampleActiveSetAtom(activeSet), st.activeIntIdx, config.randRound)
+                stats.activeSetRoundCount += 1
+            else
+                roundSolution!(xRound, xFrac, st.activeIntIdx, config.randRound)
+            end
         end
 
         # Rounding debug info

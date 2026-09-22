@@ -12,6 +12,19 @@ function getRoundingThreshold(random::Bool)
     end
 end
 
+# Weighted-random pick of one active-set atom, probability proportional to its FW weight
+function sampleActiveSetAtom(activeSet)
+    r = rand() * sum(activeSet.weights)
+    cum = 0.0
+    for i in eachindex(activeSet.weights)
+        cum += activeSet.weights[i]
+        if r <= cum
+            return activeSet.atoms[i]
+        end
+    end
+    return activeSet.atoms[end]  # floating-point fallback
+end
+
 function roundSolution!(
     xRound::Vector{Float64},
     x::Vector{Float64},

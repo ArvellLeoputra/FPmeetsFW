@@ -9,6 +9,8 @@ The fields can be set via a configuration file or command-line arguments.
     runName::String = "fpfw"
     "time budget in seconds for the FPFW heuristic only"
     timeLimit::Float64 = 300.0
+    "SCIP's own presolve/root-LP deadline; 0 reuses timeLimit"
+    scipTimeLimit::Float64 = 0.0
     "apply presolving to the original problem before running the heuristic"
     presolve::Bool = true
     "random seed for reproducibility"
@@ -47,6 +49,8 @@ The fields can be set via a configuration file or command-line arguments.
     fixedStepSize::Float64 = 0.5
     "warm start the active set for the Frank-Wolfe algorithm"
     fwWarmStart::Bool = false
+    "round from a weighted-random active-set atom instead of xFrac (needs fwWarmStart, fwVariant != :vanilla)"
+    fwActiveSetRound::Bool = false
     "use the raw SCIP-LPI LMO and seed its basis from SCIP's LP basis (vs the MOI-based LMO)"
     lmoWarmStart::Bool = true
     "stop a FW projection early after this many non-improving dual_gap steps in a row; 0 disables"
@@ -116,6 +120,8 @@ Used for logging and reporting purposes.
     "FW dual-gap tracking: sum/count of the final dual_gap reached by each FW-projection call, for a per-solve mean"
     sumFwGap::Float64 = 0.0
     fwGapSamples::Int = 0
+    "times xRound was rounded from a sampled active-set atom instead of xFrac"
+    activeSetRoundCount::Int = 0
 
     "lock-feature statistics"
     lockVarsPeak::Int = 0

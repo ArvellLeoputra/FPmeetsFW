@@ -58,12 +58,14 @@ function buildFPFWConfig(params::Dict{String, String})
     fwLockMaxFrac = parse(Float64, get(params, "fwLockMaxFrac", "0.1"))
     fwLockCap = parse(Int, get(params, "fwLockCap", "100"))
     timeLimit = parse(Float64, params["timeLimit"])
+    scipTimeLimit = parse(Float64, get(params, "scipTimeLimit", "0.0"))
     alpha = parse(Float64, params["alpha"])
     alphaFactor = parse(Float64, params["alphaFactor"])
     randRound = parse(Bool, params["randomizedRounding"])
     randFeasCheck = parse(Bool, params["randomFeasibilityCheck"])
     walksatPerturb = parse(Bool, params["walksatPerturb"])
     fwWarmStart = parse(Bool, params["fwWarmStart"])
+    fwActiveSetRound = parse(Bool, get(params, "fwActiveSetRound", "false"))
     lmoWarmStart = parse(Bool, params["lmoWarmStart"])
     useDive = parse(Bool, params["useDive"])
     presolve = parse(Bool, params["presolve"])
@@ -120,6 +122,10 @@ function buildFPFWConfig(params::Dict{String, String})
         error("fwLockThreshold requires lmoWarmStart=true — bound-locking needs the raw SCIP-LPI LMO")
     end
 
+    if fwActiveSetRound && (!fwWarmStart || fwVariant == :vanilla)
+        error("fwActiveSetRound requires fwWarmStart=true and fwVariant != :vanilla — vanilla has no active set")
+    end
+
     if fwLockMaxFrac <= 0.0 || fwLockMaxFrac > 1.0
         error("Invalid fwLockMaxFrac: $fwLockMaxFrac. Must be in (0, 1]")
     end
@@ -149,12 +155,14 @@ function buildFPFWConfig(params::Dict{String, String})
         fwLockMaxFrac = fwLockMaxFrac,
         fwLockCap = fwLockCap,
         timeLimit = timeLimit,
+        scipTimeLimit = scipTimeLimit,
         alpha = alpha,
         alphaFactor = alphaFactor,
         randRound = randRound,
         randFeasCheck = randFeasCheck,
         walksatPerturb = walksatPerturb,
         fwWarmStart = fwWarmStart,
+        fwActiveSetRound = fwActiveSetRound,
         lmoWarmStart = lmoWarmStart,
         useDive = useDive,
         presolve = presolve,

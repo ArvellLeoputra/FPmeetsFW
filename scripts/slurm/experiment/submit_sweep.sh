@@ -101,7 +101,7 @@ case "$THROTTLE" in ''|*[!0-9]*) echo "Error: -j must be a positive integer, got
 
 PROJECT_DIR="${PROJECT_DIR:-/home/htc/aleoputra/project}"
 FPFW_DIR="$PROJECT_DIR/FPmeetsFW"
-INSTANCE_DIR="$PROJECT_DIR/instances/miplib_selected"
+INSTANCE_DIR="${INSTANCE_DIR:-$PROJECT_DIR/instances/miplib_selected}"
 COMP_RESULT="$PROJECT_DIR/compResult"
 SETTINGS_DIR="$FPFW_DIR/settings"
 JULIA_BIN="${JULIA_BIN:-/home/htc/aleoputra/scratch/julia-1.12.6/bin}"

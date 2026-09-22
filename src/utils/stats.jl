@@ -98,12 +98,16 @@ function printConfigs(config::FPFWConfig)
         println("fwLockCap = $(config.fwLockCap)")
     end
     println("timeLimit = $(config.timeLimit)")
+    if config.scipTimeLimit > 0
+        println("scipTimeLimit = $(config.scipTimeLimit)")
+    end
     println("alpha = $(config.alpha)")
     println("alphaFactor = $(config.alphaFactor)")
     println("randomizedRounding = $(config.randRound ? "enabled" : "disabled")")
     println("walksatPerturb = $(config.walksatPerturb ? "enabled" : "disabled")")
     println("randomizedFeasibilityCheck = $(config.randFeasCheck ? "enabled" : "disabled")")
     println("fwWarmStart = $(config.fwWarmStart ? "enabled" : "disabled")")
+    println("fwActiveSetRound = $(config.fwActiveSetRound ? "enabled" : "disabled")")
     println("lmoWarmStart = $(config.lmoWarmStart ? "enabled" : "disabled")")
     println("useDive = $(config.useDive ? "enabled" : "disabled")")
     println("presolve = $(config.presolve ? "enabled" : "disabled")")
@@ -162,6 +166,7 @@ function printResults(stats::FPFWStats)
         println("rfcCalls = $(stats.rfcCalls)")
         println("diveCalls = $(stats.diveCalls)")
         println("roundSubmits = $(stats.roundSubmits)")
+        println("activeSetRoundCount = $(stats.activeSetRoundCount)")
         println("fwIterations = $(stats.fwIterations)")
         avgFwGapStr = stats.fwGapSamples > 0 ? @sprintf("%.6g", stats.sumFwGap / stats.fwGapSamples) : "n/a"
         println("avgFwGap = $avgFwGapStr")
@@ -198,6 +203,7 @@ function writeResults(stats::FPFWStats, config::FPFWConfig, fileName::String, re
         "rfcCalls" => stats.rfcCalls,
         "diveCalls" => stats.diveCalls,
         "roundSubmits" => stats.roundSubmits,
+        "activeSetRoundCount" => stats.activeSetRoundCount,
         "pumpIterations" => stats.pumpIterations,
         "fwIterations" => stats.fwIterations,
         "avgFwGap" => stats.fwGapSamples > 0 ? stats.sumFwGap / stats.fwGapSamples : nothing,

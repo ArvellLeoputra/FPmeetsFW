@@ -4,7 +4,8 @@ function runInstance(fileName::String, config::FPFWConfig, resultsDir::String=""
     globalStartTime = time()
     Random.seed!(config.seed)
 
-    model = minimal_setup(time_limit=config.timeLimit, presolve=config.presolve, verbosity=config.verbose)
+    scipTimeLimit = config.scipTimeLimit > 0 ? config.scipTimeLimit : config.timeLimit
+    model = minimal_setup(time_limit=scipTimeLimit, presolve=config.presolve, verbosity=config.verbose)
     backend = JuMP.unsafe_backend(model)
     scip = backend.inner
 
