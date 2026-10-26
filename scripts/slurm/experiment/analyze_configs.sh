@@ -59,8 +59,14 @@ field() {
 ensure_summary() {
     local folder="$1"
     local summary="$COMP_RESULT/config_comparison/$folder/solution_summary.txt"
-    if [ ! -f "$summary" ]; then
-        echo "No summary yet for $folder, generating via analyze_results.sh..." >&2
+    local stale=0
+    if [ -f "$summary" ]; then
+        # Regenerate if any results.json in the source folder is newer than the cached
+        # summary (e.g. the sweep was rerun) - existence alone isn't enough to trust it.
+        [ -n "$(find "$COMP_RESULT/$folder" -name results.json -newer "$summary" -print -quit 2>/dev/null)" ] && stale=1
+    fi
+    if [ ! -f "$summary" ] || [ "$stale" = 1 ]; then
+        echo "No summary yet (or stale) for $folder, generating via analyze_results.sh..." >&2
         ( cd "$SCRIPT_DIR" && ./analyze_results.sh "$folder" "$folder" > /dev/null )
     fi
     [ -f "$summary" ]
@@ -116,7 +122,9 @@ for config in "$@"; do
     seed_folders=()
     for d in "$COMP_RESULT/${config}"_s*/; do
         [ -d "$d" ] || continue
-        seed_folders+=("$(basename "${d%/}")")
+        rel="${d%/}"                    # strip trailing slash
+        rel="${rel#"$COMP_RESULT"/}"    # strip the compResult/ prefix, KEEP any subdirs (e.g. "run1/")
+        seed_folders+=("$rel")
     done
 
     if [ ${#seed_folders[@]} -gt 0 ]; then
@@ -199,15 +207,23 @@ fi
 IFS=$'\n' sorted=($(printf '%s\n' "${rows[@]}" | sort -t'|' -k1,1rn))
 unset IFS
 
+# CONFIG column width: widest config name in this comparison (min 16, e.g. for "CONFIG" header)
+CFG_W=6
+for row in "${sorted[@]}"; do
+    IFS='|' read -r _ config _ <<< "$row"
+    [ "${#config}" -gt "$CFG_W" ] && CFG_W="${#config}"
+done
+[ "$CFG_W" -lt 16 ] && CFG_W=16
+
 {
 echo "Config comparison (per-seed aggregate) - $(date)"
-echo "============================================================================================================================================"
-printf "%-16s %-6s %-9s %-7s %-6s %-6s %-8s %-9s %-7s %-7s %-8s %-7s %-9s %-7s %-8s %-8s\n" \
+printf -v sep '%*s' "$((CFG_W + 106))" ''; echo "${sep// /=}"
+printf "%-${CFG_W}s %-6s %-9s %-7s %-6s %-6s %-8s %-9s %-7s %-7s %-8s %-7s %-9s %-7s %-8s %-8s\n" \
     "CONFIG" "SEEDS" "SOLVED~" "SD" "MIN" "MAX" "SOLVE%~" "FAILED~" "TL~" "SCIPTL~" "ITERLIM~" "FWINF~" "UNKNOWN~" "TOTAL" "AVGTIME~" "AVGHEUR~"
-echo "--------------------------------------------------------------------------------------------------------------------------------------------"
+printf -v sep '%*s' "$((CFG_W + 106))" ''; echo "${sep// /-}"
 for row in "${sorted[@]}"; do
     IFS='|' read -r _ config seeds sv_mean sv_sd sv_min sv_max pc_mean fl_mean tl_mean stl_mean il_mean fi_mean un_mean total at_mean ah_mean <<< "$row"
-    printf "%-16s %-6s %-9s %-7s %-6s %-6s %-8s %-9s %-7s %-7s %-8s %-7s %-9s %-7s %-8s %-8s\n" \
+    printf "%-${CFG_W}s %-6s %-9s %-7s %-6s %-6s %-8s %-9s %-7s %-7s %-8s %-7s %-9s %-7s %-8s %-8s\n" \
         "$config" "$seeds" "$sv_mean" "$sv_sd" "$sv_min" "$sv_max" "${pc_mean}%" "$fl_mean" "$tl_mean" "$stl_mean" "$il_mean" "$fi_mean" "$un_mean" "$total" "${at_mean}s" "${ah_mean}s"
 done
 echo ""

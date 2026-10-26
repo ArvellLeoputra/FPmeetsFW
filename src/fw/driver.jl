@@ -1,32 +1,4 @@
-# Build a gradient function for the specified indices and formula
-function buildGradFunction(intIdx::Vector{Int}, gradFormula)
-    return (storage, x) -> begin
-        storage .= 0.0
-        for i in intIdx
-            storage[i] = gradFormula(i, x)
-        end
-        return storage
-    end
-end
-
-# Debug-only wrapper around grad!: reports whenever a variable's gradient sign flips between
-# consecutive evaluations (prevGrad holds the previous gradient). Only used at verbose >= 2.
-function buildGradCheck(grad!, prevGrad, intIdx, xRound)
-    return (storage, x) -> begin
-        grad!(storage, x)
-        for i in intIdx
-            if abs(x[i] - xRound[i]) > DEF_INT_TOLERANCE &&
-                abs(prevGrad[i]) > DEF_INT_TOLERANCE && 
-                sign(storage[i]) != sign(prevGrad[i])
-                @printf("  [grad flip] var=%d x=%.6f xRound=%.6f old=%.4f new=%.4f\n",
-                    i, x[i], xRound[i], prevGrad[i], storage[i])
-            end
-        end
-        copyto!(prevGrad, storage)
-        return storage
-    end
-end
-
+# Build the objective function, gradient, and distance function for the Frank-Wolfe projection
 function buildFWFunctions(
     norm::Symbol,
     binIdx::Vector{Int},
@@ -38,22 +10,19 @@ function buildFWFunctions(
         ncols = length(xRound)
         nGInt = length(gIntIdx)
 
-        # |x_j - xRound_j| = gCoef[j] * x_j + xRound[j] on [0,1], where
-        # gCoef[j] = 1 - 2 * xRound[j] for binaries
-        gCoef = zeros(Float64, ncols)
-        for i in binIdx
-            gCoef[i] = 1.0 - 2.0 * xRound[i]
-        end
-        binOffset = sum(xRound[i] for i in binIdx; init = 0.0)
-
         f = xExt -> begin
-            binDist = sum(gCoef[i] * xExt[i] for i in binIdx; init = 0.0) + binOffset
+            # |x_j - xRound_j| = (1 - 2 * xRound[j]) * x_j + xRound[j] for binaries x_j
+            binDist = sum((1.0 - 2.0 * xRound[i]) * xExt[i] + xRound[i] for i in binIdx; init = 0.0)
             gIntDist = sum(xExt[ncols + k] for k in 1:nGInt; init = 0.0)
-            binDist + gIntDist
+            return binDist + gIntDist
         end
 
         grad! = (storage, xExt) -> begin
-            storage[1:ncols] .= gCoef
+            storage[1:ncols] .= 0.0
+            for i in binIdx
+                storage[i] = 1.0 - 2.0 * xRound[i]
+            end
+            
             for k in 1:nGInt
                 storage[ncols + k] = 1.0
             end
@@ -62,28 +31,41 @@ function buildFWFunctions(
 
         dist = (x, y) -> sum(abs(x[i] - y[i]) for i in intIdx; init = 0.0)
 
-    elseif norm == :smoothManhattan
-        f = x -> sum(sqrt((x[i] - xRound[i])^2 + DEF_INT_TOLERANCE) for i in intIdx; init = 0.0)
-
-        grad! = buildGradFunction(intIdx, (i, x) -> begin
-            d = x[i] - xRound[i]
-            d / sqrt(d^2 + DEF_INT_TOLERANCE)
-        end)
-
-        dist = (x, y) -> sum(sqrt((x[i] - y[i])^2 + DEF_INT_TOLERANCE) for i in intIdx; init = 0.0)
-    
     elseif norm == :euclidean
         f = x -> 0.5 * sum((x[i] - xRound[i])^2 for i in intIdx; init = 0.0)
 
-        grad! = buildGradFunction(intIdx, (i, x) -> x[i] - xRound[i])
+        grad! = (storage, x) -> begin
+            storage .= 0.0
+            for i in intIdx
+                storage[i] = x[i] - xRound[i]
+            end
+            return storage
+        end
 
         dist = (x, y) -> 0.5 * sum((x[i] - y[i])^2 for i in intIdx; init = 0.0)
     
     else
-        error("Unknown norm: $norm. Choose from :euclidean, :manhattan, :smoothManhattan")
+        error("Unknown norm: $norm. Choose from :euclidean, :manhattan")
     end
 
     return f, grad!, dist
+end
+
+# Debug-only wrapper around grad!: reports whenever a variable's gradient sign flips between consecutive iterations
+function buildGradCheck(grad!, prevGrad, intIdx, xRound)
+    return (storage, x) -> begin
+        grad!(storage, x)
+        for i in intIdx
+            if abs(x[i] - xRound[i]) > DEF_INT_TOLERANCE &&
+                abs(prevGrad[i]) > DEF_INT_TOLERANCE &&
+                sign(storage[i]) != sign(prevGrad[i])
+                @printf("  [grad flip] var=%d x=%.6f xRound=%.6f old=%.4f new=%.4f\n",
+                    i, x[i], xRound[i], prevGrad[i], storage[i])
+            end
+        end
+        copyto!(prevGrad, storage)
+        return storage
+    end
 end
 
 # Wrap the pure-distance with the objective-FP term:
@@ -97,16 +79,12 @@ function buildOFPFunctions(
     objCoeffs::Vector{Float64},
     ncols::Int32
 )
-    if alpha == 0.0
-        return f, grad!
-    end
-
     fOFP = x -> begin
         objTerm = 0.0
         for j in 1:ncols
             objTerm += objCoeffs[j] * x[j]
         end
-        (1 - alpha) * f(x) + alpha * weight * objTerm
+        return (1 - alpha) * f(x) + alpha * weight * objTerm
     end
 
     gradOFP! = (storage, x) -> begin
@@ -158,6 +136,23 @@ function buildStallCallback(patience::Int, minImprovement::Float64; debug::Bool=
     end
 end
 
+function callFWVariant(variant::Symbol, f, grad!, lmo, startPoint; kwargs...)
+    if variant == :vanilla
+        if startPoint isa FrankWolfe.ActiveSet
+            error("Vanilla FW variant does not have an active set.")
+        end
+        FrankWolfe.frank_wolfe(f, grad!, lmo, startPoint; dual_gap_compute_frequency=1, kwargs...)
+    elseif variant == :away
+        FrankWolfe.away_frank_wolfe(f, grad!, lmo, startPoint; kwargs...)
+    elseif variant == :blended_pairwise
+        FrankWolfe.blended_pairwise_conditional_gradient(f, grad!, lmo, startPoint; kwargs...)
+    elseif variant == :blended
+        FrankWolfe.blended_conditional_gradient(f, grad!, lmo, startPoint; kwargs...)
+    else
+        error("Unknown FW variant: $variant. Choose from :vanilla, :away, :blended_pairwise, :blended")
+    end
+end
+
 function runFW(variant, f, grad!, lmo; x0, activeSet, warmStart, ls, remainingTime, fwMaxIterations, callback=nothing, verbose=false)
     if warmStart && activeSet !== nothing && variant !== :vanilla
         startPoint = activeSet
@@ -174,21 +169,4 @@ function runFW(variant, f, grad!, lmo; x0, activeSet, warmStart, ls, remainingTi
         timeout = remainingTime,
         trajectory = true
     )
-end
-
-function callFWVariant(variant::Symbol, f, grad!, lmo, startPoint; kwargs...)
-    if variant == :vanilla
-        if startPoint isa FrankWolfe.ActiveSet
-            error("Vanilla FW variant does not have an active set.")
-        end
-        FrankWolfe.frank_wolfe(f, grad!, lmo, startPoint; dual_gap_compute_frequency=1, kwargs...)
-    elseif variant == :away
-        FrankWolfe.away_frank_wolfe(f, grad!, lmo, startPoint; kwargs...)
-    elseif variant == :blended_pairwise
-        FrankWolfe.blended_pairwise_conditional_gradient(f, grad!, lmo, startPoint; kwargs...)
-    elseif variant == :blended
-        FrankWolfe.blended_conditional_gradient(f, grad!, lmo, startPoint; kwargs...)
-    else
-        error("Unknown FW variant: $variant. Choose from :vanilla, :away, :blended_pairwise, :blended")
-    end
 end

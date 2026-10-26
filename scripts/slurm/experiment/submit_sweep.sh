@@ -12,17 +12,30 @@
 # at a smaller scale).
 #
 # Each task writes to:
-#   compResult/<folder>_s<seed>/<instance>/{slurm_job.out,slurm_job.err,results.json}
+#   compResult/<name>/<folder>_s<seed>/<instance>/{slurm_job.out,slurm_job.err,results.json}
 # Bookkeeping for the sweep goes to:
 #   compResult/<name>/{sweep_list.tsv,job_script.sh,MANIFEST,JOBID}
+# i.e. everything for one sweep - its bookkeeping AND every config/seed's results -
+# lives together under one compResult/<name>/ directory. This is deliberate: two
+# different sweeps (different -n) can never collide even if they reuse the same
+# cfg (e.g. re-running "bpcg/base" as a reference point in a later sweep), because
+# they write into different <name>/ subtrees. Before this, results lived flatly at
+# compResult/<folder>_s<seed>/ and a later sweep reusing a cfg name would silently
+# overwrite an earlier sweep's data in the same shared folder - that's exactly how
+# the original bpcg/away/bcg "variants" comparison data was lost.
 #
-# Aggregate afterwards with analyze_configs.sh, which globs "<folder>_s*".
+# Aggregate afterwards with analyze_configs.sh, passing folder args prefixed with
+# the sweep name, e.g. "./analyze_configs.sh run2d/fpfw_bpcg_base ...".
 #
 # Usage:
 #   ./submit_sweep.sh [options] <cfg> [<cfg> ...]
 #
-#   <cfg>   settings/<cfg>.cfg basename. Result folder defaults to "fpfw_<cfg>",
-#           except "fpfw" -> "fpfw_baseline". Override per config as "cfg:folder".
+#   <cfg>   settings/<cfg>.cfg path (configs live in per-variant subfolders, e.g.
+#           "bpcg/w" -> settings/bpcg/w.cfg). Result folder defaults to
+#           "<name>/fpfw_<cfg>" with any "/" in <cfg> flattened to "_", except
+#           "fpfw" -> "<name>/fpfw_baseline". Override per config as "cfg:folder"
+#           to escape the <name>/ nesting entirely (folder is then used literally,
+#           relative to compResult/).
 #
 # Options:
 #   -s "LIST"   space-separated seed list        (default: "1 2 3 4 5")
@@ -117,9 +130,9 @@ for a in "$@"; do
     if [[ "$a" == *:* ]]; then
         cfg="${a%%:*}"; folder="${a##*:}"
     elif [ "$a" = "fpfw" ]; then
-        cfg="fpfw"; folder="fpfw_baseline"
+        cfg="fpfw"; folder="$SWEEP_NAME/fpfw_baseline"
     else
-        cfg="$a"; folder="fpfw_$a"
+        cfg="$a"; folder="$SWEEP_NAME/fpfw_${a//\//_}"
     fi
     if [ ! -f "$SETTINGS_DIR/$cfg.cfg" ]; then
         echo "Error: config not found: $SETTINGS_DIR/$cfg.cfg" >&2

@@ -9,6 +9,7 @@ structure.md
 miplib_binary/
 miplib_full/
 misc/
+settings/
 
 # Julia
 Manifest.toml

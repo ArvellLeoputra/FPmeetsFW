@@ -271,15 +271,18 @@ end
 # Initialize LMO basis from SCIP's internal LP basis
 function LPIinitBase(scip::Ptr{SCIP.SCIP_}, lmo::LPILMO, ncols::Int32, nrows::Int32)
     cstatOrig, rstatOrig = LPIgetBase(scip, ncols, nrows)
-    if lmo.ncols == ncols && lmo.nrows == nrows
-        cstat, rstat = cstatOrig, rstatOrig
-    else
-        cstat = zeros(Cint, lmo.ncols)
-        cstat[1:ncols] .= cstatOrig
-        rstat = ones(Cint, lmo.nrows)
-        rstat[1:nrows] .= rstatOrig
-    end
+    LPIinitBaseFrom(lmo, cstatOrig, rstatOrig, ncols, nrows)
+end
+
+# Initialize LMO basis from a given basis, using only its first ncols/nrows (the original LP part).
+# Any manhattan aux block is padded as aux columns at lower bound and aux rows basic.
+function LPIinitBaseFrom(lmo::LPILMO, cstatSrc::Vector{Cint}, rstatSrc::Vector{Cint}, ncols::Int32, nrows::Int32)
+    cstat = zeros(Cint, lmo.ncols)
+    cstat[1:ncols] .= @view cstatSrc[1:ncols]
+    rstat = ones(Cint, lmo.nrows)
+    rstat[1:nrows] .= @view rstatSrc[1:nrows]
     LPIsetBase(lmo, cstat, rstat)
+    
     # Track the basis to fallback in case of infeasibility in the LMO's LPI after locking variables
     lmo.fallbackCstat[] = cstat
     lmo.fallbackRstat[] = rstat
@@ -326,8 +329,6 @@ function FrankWolfe.compute_extreme_point(lmo::LPILMO, direction::AbstractVector
     verbosed = lmo.verbose >= 2 && simplexIter[] > 0
 
     if verbosed
-        # @printf("LMO direction: pos=%d neg=%d zeros=%d\n",
-        #     count(>(0.0), direction), count(<(0.0), direction), count(==(0.0), direction))
         @printf("LMO basis before solve: cstat L=%d B=%d U=%d | rstat L=%d B=%d U=%d\n",
             count(==(0), cstatBefore), count(==(1), cstatBefore), count(==(2), cstatBefore),
             count(==(0), rstatBefore), count(==(1), rstatBefore), count(==(2), rstatBefore))

@@ -1,5 +1,5 @@
 # Valid options for FPFWConfig fields
-const VALID_NORMS = (:euclidean, :manhattan, :smoothManhattan)
+const VALID_NORMS = (:euclidean, :manhattan)
 const VALID_FW_VARIANTS = (:vanilla, :away, :blended_pairwise, :blended)
 const VALID_FW_STEP_SIZES = (:agnostic, :backtracking, :secant, :adaptive, :unitary, :fixed)
 
@@ -66,8 +66,12 @@ function buildFPFWConfig(params::Dict{String, String})
     walksatPerturb = parse(Bool, params["walksatPerturb"])
     fwWarmStart = parse(Bool, params["fwWarmStart"])
     fwActiveSetRound = parse(Bool, get(params, "fwActiveSetRound", "false"))
+    fwActiveSetRoundStagnation = parse(Int, get(params, "fwActiveSetRoundStagnation", "0"))
+    fwActiveSetRoundMaxStagnation = parse(Int, get(params, "fwActiveSetRoundMaxStagnation", "0"))
+    fwAsrShakes = parse(Int, get(params, "fwAsrShakes", "0"))
     lmoWarmStart = parse(Bool, params["lmoWarmStart"])
     useDive = parse(Bool, params["useDive"])
+    exactCycleCheck = parse(Bool, get(params, "exactCycleCheck", "true"))
     presolve = parse(Bool, params["presolve"])
     seed = parse(Int, params["seed"])
     verbose = parse(Int, params["verbose"])
@@ -122,8 +126,36 @@ function buildFPFWConfig(params::Dict{String, String})
         error("fwLockThreshold requires lmoWarmStart=true — bound-locking needs the raw SCIP-LPI LMO")
     end
 
+    if fwLockThreshold > 0 && norm == :manhattan
+        error("manhattan norm does not support fwLockThreshold — bound-locking is euclidean-only")
+    end
+
     if fwActiveSetRound && (!fwWarmStart || fwVariant == :vanilla)
         error("fwActiveSetRound requires fwWarmStart=true and fwVariant != :vanilla — vanilla has no active set")
+    end
+
+    if fwActiveSetRoundStagnation < 0
+        error("Invalid fwActiveSetRoundStagnation: $fwActiveSetRoundStagnation. Must be >= 0 (0 = every iteration)")
+    end
+
+    if fwActiveSetRoundMaxStagnation < 0
+        error("Invalid fwActiveSetRoundMaxStagnation: $fwActiveSetRoundMaxStagnation. Must be >= 0 (0 = no ceiling)")
+    end
+
+    if fwAsrShakes < 0
+        error("Invalid fwAsrShakes: $fwAsrShakes. Must be >= 0 (0 disables)")
+    end
+
+    if fwAsrShakes > 0 && (!fwWarmStart || fwVariant == :vanilla || fwStepSize == :unitary)
+        error("fwAsrShakes requires fwWarmStart=true, fwVariant != :vanilla, and a non-unitary fwStepSize")
+    end
+
+    if fwAsrShakes > 0 && fwActiveSetRound
+        error("fwAsrShakes and fwActiveSetRound are alternative uses of the active set; enable at most one")
+    end
+
+    if fwActiveSetRoundMaxStagnation > 0 && fwActiveSetRoundMaxStagnation <= fwActiveSetRoundStagnation
+        error("fwActiveSetRoundMaxStagnation ($fwActiveSetRoundMaxStagnation) must be > fwActiveSetRoundStagnation ($fwActiveSetRoundStagnation), or the window is empty")
     end
 
     if fwLockMaxFrac <= 0.0 || fwLockMaxFrac > 1.0
@@ -163,8 +195,12 @@ function buildFPFWConfig(params::Dict{String, String})
         walksatPerturb = walksatPerturb,
         fwWarmStart = fwWarmStart,
         fwActiveSetRound = fwActiveSetRound,
+        fwActiveSetRoundStagnation = fwActiveSetRoundStagnation,
+        fwActiveSetRoundMaxStagnation = fwActiveSetRoundMaxStagnation,
+        fwAsrShakes = fwAsrShakes,
         lmoWarmStart = lmoWarmStart,
         useDive = useDive,
+        exactCycleCheck = exactCycleCheck,
         presolve = presolve,
         seed = seed,
         verbose = verbose,

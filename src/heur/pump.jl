@@ -38,9 +38,11 @@ function roundSolution!(
     end
 end
 
-# Hash function for cycle detection (only hashes integer variable values)
+# Hash function for cycle detection (only hashes integer variable values).
+# Hashes the already-integer-valued Float64s directly rather than converting
+# to Int, since a diverged iterate can round to a value outside Int64's range.
 function hashRounded(xRound::Vector{Float64}, intIdx::Vector{Int})
-    return hash(Int.(xRound[intIdx]))
+    return hash(@view xRound[intIdx])
 end
 
 # Compute the support of the violated constraints in the LP, restricted to eligible variables

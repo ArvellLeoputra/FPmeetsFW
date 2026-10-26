@@ -2,6 +2,47 @@ function timeElapsed(start::Float64)
     return time() - start
 end
 
+# Instance name (no directory, no .mps/.mps.gz suffix) from an instance file path.
+function instanceName(fileName::String)
+    base = basename(fileName)
+    for suf in (".mps.gz", ".mps")
+        if endswith(base, suf)
+            return base[1:end-length(suf)]
+        end
+    end
+    return base
+end
+
+# instance name -> known optimal/best-known objective, from SOLU_FILE's "=opt="/"=best=" lines.
+function loadKnownOptimal(fileName::String)
+    name = instanceName(fileName)
+    isfile(SOLU_FILE) || return NaN
+    for line in eachline(SOLU_FILE)
+        parts = split(line)
+        length(parts) >= 3 || continue
+        status = strip(parts[1], '=')
+        (status == "opt" || status == "best") || continue
+        if parts[2] == name
+            return parse(Float64, parts[3])
+        end
+    end
+    return NaN
+end
+
+# Primal gap vs a known optimal/best-known reference:
+#   0 if both are 0; |x*-x~|/|x*| if same-sign and nonzero; Inf otherwise (incl. not found).
+function computeGap(knownOptimal::Float64, primalBound::Float64, solutionFound::Bool)
+    isnan(knownOptimal) && return NaN  # no reference available for this instance
+    !solutionFound && return Inf
+    if knownOptimal == 0.0 && primalBound == 0.0
+        return 0.0
+    elseif knownOptimal * primalBound > 0
+        return abs(knownOptimal - primalBound) / abs(knownOptimal)
+    else
+        return Inf
+    end
+end
+
 function computePrimalIntegral(events::Vector{Tuple{Float64, Float64}}, totalTime::Float64)
     area = 0.0
     prevTime = 0.0
@@ -17,17 +58,17 @@ function computePrimalIntegral(events::Vector{Tuple{Float64, Float64}}, totalTim
     return area
 end
 
-function buildStats(scip::SCIP.SCIPData, heur::FPFWHeuristic, totalTime::Float64)
+function buildStats(scip::SCIP.SCIPData, heur::FPFWHeuristic, totalTime::Float64, fileName::String)
     stats = heur.data.stats
     if heur.data.called > 0
         stats.totalTime = totalTime
         stats.primalIntegral = computePrimalIntegral(stats.primalEvents, totalTime)
+        stats.knownOptimal = loadKnownOptimal(fileName)
+        stats.gap = computeGap(stats.knownOptimal, stats.primalBound, stats.solutionFound)
         return stats
     end
 
     stats.primalBound = Float64(SCIP.SCIPgetPrimalbound(scip))
-    stats.dualBound = Float64(SCIP.SCIPgetDualbound(scip))
-    stats.gap = Float64(SCIP.SCIPgetGap(scip))
 
     stats.totalTime = totalTime
     stats.rootTime = totalTime
@@ -49,6 +90,8 @@ function buildStats(scip::SCIP.SCIPData, heur::FPFWHeuristic, totalTime::Float64
     end
 
     stats.primalIntegral = computePrimalIntegral(stats.primalEvents, totalTime)
+    stats.knownOptimal = loadKnownOptimal(fileName)
+    stats.gap = computeGap(stats.knownOptimal, stats.primalBound, stats.solutionFound)
 
     return stats
 end
@@ -108,8 +151,10 @@ function printConfigs(config::FPFWConfig)
     println("randomizedFeasibilityCheck = $(config.randFeasCheck ? "enabled" : "disabled")")
     println("fwWarmStart = $(config.fwWarmStart ? "enabled" : "disabled")")
     println("fwActiveSetRound = $(config.fwActiveSetRound ? "enabled" : "disabled")")
+    println("fwAsrShakes = $(config.fwAsrShakes)")
     println("lmoWarmStart = $(config.lmoWarmStart ? "enabled" : "disabled")")
     println("useDive = $(config.useDive ? "enabled" : "disabled")")
+    println("exactCycleCheck = $(config.exactCycleCheck ? "enabled" : "disabled")")
     println("presolve = $(config.presolve ? "enabled" : "disabled")")
     println("seed = $(config.seed)")
     println("verbose = $(config.verbose)")
@@ -146,8 +191,8 @@ function printResults(stats::FPFWStats)
 
     printstyled("[result]\n", color=:cyan)
     println("primalBound = $(round(stats.primalBound, digits=4))")
-    println("dualBound = $(round(stats.dualBound, digits=4))")
-    gapStr = stats.gap >= 1e19 ? @sprintf("%.0e", stats.gap) : @sprintf("%.2f %%", stats.gap * 100)
+    println("knownOptimal = $(isnan(stats.knownOptimal) ? "n/a" : round(stats.knownOptimal, digits=4))")
+    gapStr = isnan(stats.gap) ? "n/a (no reference)" : isinf(stats.gap) ? "inf" : @sprintf("%.2f %%", stats.gap * 100)
     println("gap = $gapStr")
     println("primalIntegral = $(round(stats.primalIntegral, digits=4))")
     println("solFound = $(stats.solutionFound)")
@@ -167,6 +212,7 @@ function printResults(stats::FPFWStats)
         println("diveCalls = $(stats.diveCalls)")
         println("roundSubmits = $(stats.roundSubmits)")
         println("activeSetRoundCount = $(stats.activeSetRoundCount)")
+        println("asrShakeCount = $(stats.asrShakeCount)")
         println("fwIterations = $(stats.fwIterations)")
         avgFwGapStr = stats.fwGapSamples > 0 ? @sprintf("%.6g", stats.sumFwGap / stats.fwGapSamples) : "n/a"
         println("avgFwGap = $avgFwGapStr")
@@ -189,8 +235,11 @@ function writeResults(stats::FPFWStats, config::FPFWConfig, fileName::String, re
         "instance" => basename(fileName),
         "runName" => config.runName,
         "primalBound" => stats.primalBound,
-        "dualBound" => stats.dualBound,
-        "gap" => stats.gap,
+        "knownOptimal" => isnan(stats.knownOptimal) ? nothing : stats.knownOptimal,
+        # gap vs knownOptimal (Definition 1.2, Mexi 2021), not SCIP's own dual bound.
+        # "Inf" = no solution found (or the formula's own sign-mismatch case);
+        # "NaN" = no known-optimal reference available for this instance.
+        "gap" => isnan(stats.gap) ? "NaN" : (isinf(stats.gap) ? "Inf" : stats.gap),
         "primalIntegral" => stats.primalIntegral,
         "solutionFound" => stats.solutionFound,
         "totalTime" => stats.totalTime,
@@ -204,6 +253,7 @@ function writeResults(stats::FPFWStats, config::FPFWConfig, fileName::String, re
         "diveCalls" => stats.diveCalls,
         "roundSubmits" => stats.roundSubmits,
         "activeSetRoundCount" => stats.activeSetRoundCount,
+        "asrShakeCount" => stats.asrShakeCount,
         "pumpIterations" => stats.pumpIterations,
         "fwIterations" => stats.fwIterations,
         "avgFwGap" => stats.fwGapSamples > 0 ? stats.sumFwGap / stats.fwGapSamples : nothing,

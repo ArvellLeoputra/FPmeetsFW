@@ -26,7 +26,7 @@ function runInstance(fileName::String, config::FPFWConfig, resultsDir::String=""
 
     totalTime = timeElapsed(globalStartTime)
 
-    stats = buildStats(scip, heur, totalTime)
+    stats = buildStats(scip, heur, totalTime, fileName)
     printResults(stats)
 
     if !isempty(resultsDir)

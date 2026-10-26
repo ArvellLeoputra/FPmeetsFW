@@ -97,6 +97,7 @@ function setupPumpDisplay(config)
     addColumn!(pumpDisplay, "fwGap", 13, 6)
     addColumn!(pumpDisplay, "time", 10, 2)
     addColumn!(pumpDisplay, "#flips", 8)
+    config.fwAsrShakes > 0 && addColumn!(pumpDisplay, "A", 3)
     addColumn!(pumpDisplay, "P", 3)
     addColumn!(pumpDisplay, "R", 3)
     addColumn!(pumpDisplay, "status", 14)
@@ -121,41 +122,52 @@ function printVerboseIteration(
     flips::String,
     perturbed::Bool,
     restarted::Bool,
-    outcome::String
+    outcome::String;
+    shakeFlag::String = ""
 )
     alphaStr = alpha > 0.0 ? @sprintf("alpha=%.4f ", alpha) : ""
-    @printf("FW: stage=%d %sorigObj=%.4f projObj=%.4f step=%.4f nFrac=%d fwIters=%d fwGap=%.6g iterTime=%.4fs #flips=%s P=%s R=%s -> %s\n",
+    @printf("FW: stage=%d %sorigObj=%.4f projObj=%.4f step=%.4f nFrac=%d fwIters=%d fwGap=%.6g iterTime=%.4fs #flips=%s %sP=%s R=%s -> %s\n",
         stage, alphaStr, origObj, projObj, step, nFrac, fwIters, fwGap, iterTime, flips,
-        perturbed ? "*" : " ", restarted ? "*" : " ", outcome)
+        shakeFlag, perturbed ? "*" : " ", restarted ? "*" : " ", outcome)
+end
+
+# P/A/R flag columns; A (active-set shake) only exists when fwAsrShakes is on
+function flagCols(config, perturbed, shaken, restarted; blank = "")
+    p = perturbed ? "*" : blank
+    r = restarted ? "*" : blank
+    return config.fwAsrShakes > 0 ? (shaken ? "*" : blank, p, r) : (p, r)
 end
 
 # Logs one FW-projection iteration's outcome
 function logIteration(
     config, pumpDisplay, stats, stage, alpha, origObj, projObj, step, nFrac, fwIters, fwGap,
-    iterTime, heurStartTime, flips, perturbed, restarted, rowLabel, verboseLabel
+    iterTime, heurStartTime, flips, perturbed, restarted, shaken, rowLabel, verboseLabel
 )
     if config.verbose == 1
         head = config.alpha > 0.0 ? (stats.pumpIterations, stage, alpha) : (stats.pumpIterations, stage)
         printRow!(pumpDisplay, head..., origObj, projObj, step, nFrac, fwIters, fwGap,
-            timeElapsed(heurStartTime), formatFlips(flips), perturbed ? "*" : "", restarted ? "*" : "", rowLabel)
+            timeElapsed(heurStartTime), formatFlips(flips), flagCols(config, perturbed, shaken, restarted)..., rowLabel)
 
     elseif config.verbose >= 2
+        shakeFlag = config.fwAsrShakes > 0 ? "A=$(shaken ? "*" : " ") " : ""
         printVerboseIteration(stage, alpha, origObj, projObj, step, nFrac, fwIters, fwGap, iterTime,
-            formatFlips(flips), perturbed, restarted, verboseLabel)
+            formatFlips(flips), perturbed, restarted, verboseLabel; shakeFlag = shakeFlag)
     end
 end
 
 # Logs a direct-acceptance event (RandFeasCheck / FeasRound / DiveSolve)
-function logDirectAccept(config, pumpDisplay, stats, stage, alpha, origObj, step, heurStartTime, flips, perturbed, restarted, rowLabel, verboseLabel)
+function logDirectAccept(config, pumpDisplay, stats, stage, alpha, origObj, step, heurStartTime, flips, perturbed, restarted, shaken, rowLabel, verboseLabel)
     elapsed = timeElapsed(heurStartTime)
     if config.verbose == 1
         head = config.alpha > 0.0 ? (stats.pumpIterations, stage, alpha) : (stats.pumpIterations, stage)
         printRow!(pumpDisplay, head..., origObj, 0.0, step, 0, 0, NaN, elapsed,
-            formatFlips(flips), perturbed ? "*" : "", restarted ? "*" : "", rowLabel)
+            formatFlips(flips), flagCols(config, perturbed, shaken, restarted)..., rowLabel)
 
     elseif config.verbose >= 2
         alphaStr = alpha > 0.0 ? @sprintf("alpha=%.4f ", alpha) : ""
-        @printf("%s: stage=%d %sorigObj=%.4f step=%.4f elapsed=%.4fs #flips=%s P=%s R=%s\n",
-            verboseLabel, stage, alphaStr, origObj, step, elapsed, formatFlips(flips), perturbed ? "*" : " ", restarted ? "*" : " ")
+        shakeFlag = config.fwAsrShakes > 0 ? "A=$(shaken ? "*" : " ") " : ""
+        @printf("%s: stage=%d %sorigObj=%.4f step=%.4f elapsed=%.4fs #flips=%s %sP=%s R=%s\n",
+            verboseLabel, stage, alphaStr, origObj, step, elapsed, formatFlips(flips),
+            shakeFlag, perturbed ? "*" : " ", restarted ? "*" : " ")
     end
 end

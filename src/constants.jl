@@ -11,6 +11,10 @@ const DEF_GRAD_FLIP_TOL = 1e-3
 # SCIP's own limits/time, set effectively unbounded so it never cuts the solve off early
 const DEF_SCIP_TIME_LIMIT = 1000000
 
+# MIPLIB .solu file: instance -> known optimal/best-known objective, 
+# Source: https://miplib.zib.de/downloads/miplib2017-v36.solu.
+const SOLU_FILE = joinpath(@__DIR__, "..", "data", "miplib2017-v36.solu")
+
 # Perturbation and restart parameters
 const DEF_MAX_STAGNATION = 3       # Iterations without a real (>= threshold) projObj improvement before perturbing
 const DEF_MIN_IMPROVEMENT = 0.10   # Relative improvement in projObj required to reset the stagnation counter

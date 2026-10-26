@@ -9,7 +9,7 @@ function updateLockState!(
     stats::FPFWStats,
     ncols::Int32
 )
-    if !(config.fwLockThreshold > 0 && config.norm != :manhattan)
+    if config.fwLockThreshold == 0
         return
     end
 

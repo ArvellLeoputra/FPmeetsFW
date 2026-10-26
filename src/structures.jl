@@ -34,6 +34,8 @@ The fields can be set via a configuration file or command-line arguments.
     "fallback each iteration: when xRound isn't accepted, fix integers to xRound and
     solve the LP to recover feasible continuous values"
     useDive::Bool = false
+    "unitary only: perturb/restart on an exact repeat of the rounded point; false relies on pump stagnation alone"
+    exactCycleCheck::Bool = true
 
     # --- Frank-Wolfe ---
     "norm used for the projection step"
@@ -51,6 +53,12 @@ The fields can be set via a configuration file or command-line arguments.
     fwWarmStart::Bool = false
     "round from a weighted-random active-set atom instead of xFrac (needs fwWarmStart, fwVariant != :vanilla)"
     fwActiveSetRound::Bool = false
+    "stagnationCount needed before fwActiveSetRound kicks in; 0 = every iteration"
+    fwActiveSetRoundStagnation::Int = 0
+    "stagnationCount ceiling for fwActiveSetRound (excludes it once perturb would also fire); 0 = no ceiling"
+    fwActiveSetRoundMaxStagnation::Int = 0
+    "non-unitary only: active-set-rounding shakes tried before each perturb once stagnated; 0 disables"
+    fwAsrShakes::Int = 0
     "use the raw SCIP-LPI LMO and seed its basis from SCIP's LP basis (vs the MOI-based LMO)"
     lmoWarmStart::Bool = true
     "stop a FW projection early after this many non-improving dual_gap steps in a row; 0 disables"
@@ -94,9 +102,11 @@ A struct that holds the statistics of a run of the FPFW heuristic.
 Used for logging and reporting purposes.
 """
 @kwdef mutable struct FPFWStats
-    "objective bounds and final gap"
+    "objective bound and final gap"
     primalBound::Float64 = Inf
-    dualBound::Float64 = Inf
+    "known optimal/best-known objective for this instance (MIPLIB .solu), NaN if not found"
+    knownOptimal::Float64 = NaN
+    "primal gap vs knownOptimal, not vs SCIP's own dual bound"
     gap::Float64 = Inf
 
     "primal integral tracking"
@@ -122,6 +132,8 @@ Used for logging and reporting purposes.
     fwGapSamples::Int = 0
     "times xRound was rounded from a sampled active-set atom instead of xFrac"
     activeSetRoundCount::Int = 0
+    "times a stagnation escape used an active-set shake instead of a perturb"
+    asrShakeCount::Int = 0
 
     "lock-feature statistics"
     lockVarsPeak::Int = 0
@@ -222,6 +234,8 @@ except `stage1NoImpr`, which is a stage-1-only signal and is never reset on tran
     stagnationCount::Int = 0
     "perturbs since the last restart or stage start"
     consecutivePerturbs::Int = 0
+    "active-set shakes since the last perturb, restart, or stage start"
+    consecutiveAsrShakes::Int = 0
     "stage-1 only: iterations since the last significant (DEF_MIN_IMPROVEMENT) gain vs closestDist
     (the stage's all-time best), so it survives perturb/restart. Forces the stage 1 -> 2 handoff."
     stage1NoImpr::Int = 0

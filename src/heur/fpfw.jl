@@ -1,5 +1,6 @@
-# Build the LMO: raw SCIP-LPI (lmoWarmStart) or MOI-based, seeding the LPI one's basis if optimal.
-# Rebuilt at the stage-1 -> stage-2 transition too, since manhattan's aux rows are sized by activeGIntIdx.
+# Build the LMO: raw SCIP-LPI (lmoWarmStart) or MOI-based. The LPI one's basis is seeded from SCIP's
+# LP basis if optimal. Rebuilt at the stage-1 -> stage-2 transition too, since manhattan's aux rows are
+# sized by activeGIntIdx; there the old LMO's last lock-free basis is carried over instead.
 function setupLMO!(
     scip::Ptr{SCIP.SCIP_},
     data::FPFWRunData,
@@ -11,7 +12,11 @@ function setupLMO!(
 )
     setupStart = time()
     if config.lmoWarmStart
+        # Fallback basis = most recent basis from a successful lock-free solve (locks would leave
+        # locked vars nonbasic at a tightened bound), so it is the safest one to carry over.
+        prevCstat, prevRstat = Cint[], Cint[]
         if freeOld
+            prevCstat, prevRstat = data.lmo.fallbackCstat[], data.lmo.fallbackRstat[]
             oldLpiRef = Ref(data.lmo.lpi)
             SCIP.@SCIP_CALL SCIP.SCIPlpiFree(oldLpiRef)
         end
@@ -20,7 +25,9 @@ function setupLMO!(
         scipLpiRef = Ref{Ptr{SCIP.SCIP_LPI}}(C_NULL)
         SCIP.@SCIP_CALL SCIP.SCIPgetLPI(scip, scipLpiRef)
 
-        if SCIP.SCIPlpiIsOptimal(scipLpiRef[]) == SCIP.TRUE
+        if !isempty(prevCstat)
+            LPIinitBaseFrom(data.lmo, prevCstat, prevRstat, lp.ncols, lp.nrows)
+        elseif SCIP.SCIPlpiIsOptimal(scipLpiRef[]) == SCIP.TRUE
             LPIinitBase(scip, data.lmo, lp.ncols, lp.nrows)
         end
     else
@@ -73,6 +80,7 @@ function transitionToStage2!(
     st.bestProjObj = Inf
     st.stagnationCount = 0
     st.consecutivePerturbs = 0
+    st.consecutiveAsrShakes = 0
     st.transitioned = true
 
     # LMO was just rebuilt, so locked bounds are already gone — reset tracking to match.
@@ -287,6 +295,7 @@ function SCIP.find_primal_solution(
         st.stageIter += 1
         restarted = false
         perturbed = false
+        shaken = false
         flips = 0
 
         iterStartTime = time()  # FP iter start time
@@ -307,7 +316,7 @@ function SCIP.find_primal_solution(
                 origObj = origObjective(scip, lpCols, xProbe, ncols)
                 step = dist(xProbe, prevProj)
 
-                logDirectAccept(config, pumpDisplay, stats, st.stage, alpha, origObj, step, heurStartTime, flips, perturbed, restarted, "randFeasCheck", "RandFeasCheck")
+                logDirectAccept(config, pumpDisplay, stats, st.stage, alpha, origObj, step, heurStartTime, flips, perturbed, restarted, shaken, "randFeasCheck", "RandFeasCheck")
 
                 break
             end
@@ -319,7 +328,9 @@ function SCIP.find_primal_solution(
             roundSolution!(xRound, st.closestRound, gIntIdx, config.randRound)
             st.transitioned = false
         else
-            if config.fwActiveSetRound && activeSet !== nothing && !isempty(activeSet.atoms)
+            if config.fwActiveSetRound && activeSet !== nothing && !isempty(activeSet.atoms) &&
+               st.stagnationCount >= config.fwActiveSetRoundStagnation &&
+               (config.fwActiveSetRoundMaxStagnation <= 0 || st.stagnationCount < config.fwActiveSetRoundMaxStagnation)
                 roundSolution!(xRound, sampleActiveSetAtom(activeSet), st.activeIntIdx, config.randRound)
                 stats.activeSetRoundCount += 1
             else
@@ -338,7 +349,7 @@ function SCIP.find_primal_solution(
 
         # Cycle / stagnation detection
         repeatRound = false  # unitary only: xRound identical to one already submitted this stage
-        if config.fwStepSize == :unitary
+        if config.fwStepSize == :unitary && config.exactCycleCheck
             h = hashRounded(xRound, st.activeIntIdx)
 
             # stucked: the rounded solution is identical to the previous iteration's
@@ -392,6 +403,7 @@ function SCIP.find_primal_solution(
 
                     if restarted
                         st.consecutivePerturbs = 0
+                        st.consecutiveAsrShakes = 0
                         st.stagnationCount = 0
                         st.bestProjObj = Inf
                     end
@@ -407,11 +419,24 @@ function SCIP.find_primal_solution(
             prevRound .= xRound
             push!(visitedRounded, h)
         else
-            # Non-unitary FW converges gradually, so exact-hash cycle detection would over-trigger
+            # Non-unitary FW (or exactCycleCheck=false) converges gradually, so exact-hash cycle detection would over-trigger
             # Use objective stagnation instead (no improvement for DEF_MAX_STAGNATION iterations)
             if st.stagnationCount >= DEF_MAX_STAGNATION
+                # Active-set shake: an informed escape tried before a blind perturb; needs >= 2 atoms,
+                # otherwise the sampled atom is xFrac itself and the shake would be a no-op
+                if st.consecutiveAsrShakes < config.fwAsrShakes && activeSet !== nothing &&
+                   length(activeSet.atoms) >= 2
+                    st.consecutiveAsrShakes += 1
+                    roundSolution!(xRound, sampleActiveSetAtom(activeSet), st.activeIntIdx, config.randRound)
+                    stats.asrShakeCount += 1
+                    shaken = true
+                    st.stagnationCount = 0
+                    st.bestProjObj = Inf
+                    if config.verbose >= 2
+                        println("  [asrShake] $(st.consecutiveAsrShakes)/$(config.fwAsrShakes) from $(length(activeSet.atoms)) atoms")
+                    end
                 # consecutivePerturbs: perturbs since the last restart (or stage start)
-                if st.consecutivePerturbs < DEF_MAX_PERTURBS
+                elseif st.consecutivePerturbs < DEF_MAX_PERTURBS
                     st.consecutivePerturbs += 1
                     flips, nWalksat = perturb(scip, xRound, xFrac, lp, st, config)
                     if nWalksat > 0
@@ -423,9 +448,10 @@ function SCIP.find_primal_solution(
                         if stats.firstPerturbation == 0
                             stats.firstPerturbation = stats.pumpIterations
                         end
-                        # Reset counters
+                        # Reset counters; a real perturb re-arms the active-set shakes
                         st.stagnationCount = 0
                         st.bestProjObj = Inf
+                        st.consecutiveAsrShakes = 0
                     end
 
                 else  # escalate to a restart once consecutivePerturbs reaches DEF_MAX_PERTURBS
@@ -435,6 +461,7 @@ function SCIP.find_primal_solution(
                         stats.restartCount += 1
                         # Reset counters
                         st.consecutivePerturbs = 0
+                        st.consecutiveAsrShakes = 0
                         st.stagnationCount = 0
                         st.bestProjObj = Inf
                     end
@@ -470,7 +497,7 @@ function SCIP.find_primal_solution(
                 origObj = origObjective(scip, lpCols, xRound, ncols)
                 step = dist(xRound, prevProj)
 
-                logDirectAccept(config, pumpDisplay, stats, st.stage, alpha, origObj, step, heurStartTime, flips, perturbed, restarted, "feasRound", "FeasRound")
+                logDirectAccept(config, pumpDisplay, stats, st.stage, alpha, origObj, step, heurStartTime, flips, perturbed, restarted, shaken, "feasRound", "FeasRound")
 
                 break
             end
@@ -492,16 +519,19 @@ function SCIP.find_primal_solution(
                     origObj = origObjective(scip, lpCols, sol, ncols)
                     step = dist(sol, prevProj)
 
-                    logDirectAccept(config, pumpDisplay, stats, st.stage, alpha, origObj, step, heurStartTime, flips, perturbed, restarted, "diveSolve", "DiveSolve")
+                    logDirectAccept(config, pumpDisplay, stats, st.stage, alpha, origObj, step, heurStartTime, flips, perturbed, restarted, shaken, "diveSolve", "DiveSolve")
                     break
                 end
             end
         end
 
         # Step 2: "Projection" using Frank-Wolfe
-        distScale = sqrt(length(st.activeIntIdx))  # || delta ||
-        weight = alpha > 0.0 ? distScale / max(lp.objScale, 1.0) : 0.0
-        fOFP, gradOFP! = buildOFPFunctions(f, grad!, alpha, weight, lp.objCoeffs, ncols)
+        fOFP, gradOFP! = f, grad!
+        if alpha > 0.0
+            distScale = sqrt(length(st.activeIntIdx))  # || delta ||
+            weight = distScale / max(lp.objScale, 1.0)
+            fOFP, gradOFP! = buildOFPFunctions(f, grad!, alpha, weight, lp.objCoeffs, ncols)
+        end
 
         remainingTime = heurTimeLimit - timeElapsed(heurStartTime)
         if remainingTime <= 0
@@ -510,10 +540,16 @@ function SCIP.find_primal_solution(
         end
         
         fwStartTime = time()
-        simplexItersBefore = data.lmo.simplexIters[]
+        # Simplex counters, deadline and fallback basis exist only on the raw-LPI LMO (lmoWarmStart)
+        isLPI = data.lmo isa LPILMO
+        simplexItersBefore = isLPI ? data.lmo.simplexIters[] : 0
 
         # Bound the LMO's own LP solves to what's left of the budget, so a single slow LP can't run unbounded
-        data.lmo.deadline[] = time() + remainingTime
+        if isLPI
+            data.lmo.deadline[] = time() + remainingTime
+        else
+            MOI.set(data.lmo.o, MOI.TimeLimitSec(), max(remainingTime, 1e-3))
+        end
 
         local xProj, projObj, fwIters, fwGap
         deadlineExceeded = false
@@ -525,7 +561,7 @@ function SCIP.find_primal_solution(
                     activeSet, prevGrad, ncols, remainingTime
                 )
                 # Solve just succeeded with nothing locked: save this basis as the retry fallback.
-                if isempty(st.lockedIdx)
+                if isLPI && isempty(st.lockedIdx)
                     cstat, rstat = LPIgetLMOBase(data.lmo)
                     data.lmo.fallbackCstat[] = cstat
                     data.lmo.fallbackRstat[] = rstat
@@ -539,13 +575,19 @@ function SCIP.find_primal_solution(
                     # Solver error: give up cleanly instead of crashing
                     solverError = true
                     break
-                elseif e isa LMOPrimalInfeasible && attempt == 1
+                elseif e isa LMOPrimalInfeasible && attempt == 1 && isLPI
                     # Unlock everything and reset the warm-start basis to the fallback, then retry.
                     unlockAll!(st, data.lmo)
                     if !isempty(data.lmo.fallbackCstat[])
                         LPIsetBase(data.lmo, data.lmo.fallbackCstat[], data.lmo.fallbackRstat[])
                     end
                     stats.lockInfeasibleRetries += 1
+                elseif !isLPI
+                    # MOI-based LMO has no typed exceptions of its own; FrankWolfe.jl's MOI oracle
+                    # throws a raw MOI error when the LP terminates without a primal solution
+                    # (dual infeasible, or its own time limit). Treat that the same as LMOSolverError.
+                    solverError = true
+                    break
                 else
                     # LMOPrimalInfeasible in 2nd attempt: genuinely infeasible, not just a bad warm start
                     rethrow()
@@ -555,14 +597,14 @@ function SCIP.find_primal_solution(
 
         if deadlineExceeded
             stats.fwTime += timeElapsed(fwStartTime)
-            stats.lmoSimplexIters += data.lmo.simplexIters[] - simplexItersBefore
+            stats.lmoSimplexIters += isLPI ? data.lmo.simplexIters[] - simplexItersBefore : 0
             stats.exitReason = TIME_LIMIT
             break
         end
 
         if solverError
             stats.fwTime += timeElapsed(fwStartTime)
-            stats.lmoSimplexIters += data.lmo.simplexIters[] - simplexItersBefore
+            stats.lmoSimplexIters += isLPI ? data.lmo.simplexIters[] - simplexItersBefore : 0
             stats.exitReason = INFEASIBLE_FW
             break
         end
@@ -570,7 +612,7 @@ function SCIP.find_primal_solution(
         # Update FW stats
         stats.fwTime += timeElapsed(fwStartTime)
         stats.fwIterations += fwIters
-        stats.lmoSimplexIters += data.lmo.simplexIters[] - simplexItersBefore
+        stats.lmoSimplexIters += isLPI ? data.lmo.simplexIters[] - simplexItersBefore : 0
         if !isnan(fwGap)
             stats.sumFwGap += fwGap
             stats.fwGapSamples += 1
@@ -590,7 +632,7 @@ function SCIP.find_primal_solution(
         if !isSolutionLPFeasible(scip, lpRows, lpCols, xProj, colDict)
             stats.exitReason = INFEASIBLE_FW
             logIteration(config, pumpDisplay, stats, st.stage, alpha, origObj, projObj, step, nFrac, fwIters, fwGap,
-                iterTime, heurStartTime, flips, perturbed, restarted, "infeasibleFW", "infeasibleFW")
+                iterTime, heurStartTime, flips, perturbed, restarted, shaken, "infeasibleFW", "infeasibleFW")
             break
         end
 
@@ -625,16 +667,16 @@ function SCIP.find_primal_solution(
             if submitSolution(scip, heur_ptr, lpCols, xProj, ncols)
                 result = recordSolutionFound!(stats, SOLUTION_FWPROJ, scip, heurStartTime)
                 logIteration(config, pumpDisplay, stats, st.stage, alpha, origObj, projObj, step, nFrac, fwIters, fwGap,
-                    iterTime, heurStartTime, flips, perturbed, restarted, "feasFWProj", "accepted")
+                    iterTime, heurStartTime, flips, perturbed, restarted, shaken, "feasFWProj", "accepted")
 
                 break
             else  # if SCIP rejects the solution, continue
                 logIteration(config, pumpDisplay, stats, st.stage, alpha, origObj, projObj, step, nFrac, fwIters, fwGap,
-                    iterTime, heurStartTime, flips, perturbed, restarted, "rejected", "rejected")
+                    iterTime, heurStartTime, flips, perturbed, restarted, shaken, "rejected", "rejected")
             end
         else  # if xProj is not integral, continue to the next iteration
             logIteration(config, pumpDisplay, stats, st.stage, alpha, origObj, projObj, step, nFrac, fwIters, fwGap,
-                iterTime, heurStartTime, flips, perturbed, restarted, "", "continuing")
+                iterTime, heurStartTime, flips, perturbed, restarted, shaken, "", "continuing")
         end
 
         if alpha > 0.0
@@ -652,8 +694,6 @@ function SCIP.find_primal_solution(
     # Finalize stats
     stats.heurTime = timeElapsed(heurStartTime)
     stats.primalBound = Float64(SCIP.SCIPgetPrimalbound(scip))
-    stats.dualBound = Float64(SCIP.SCIPgetDualbound(scip))
-    stats.gap = Float64(SCIP.SCIPgetGap(scip))
 
     # Free the LMO if it was warm-started
     if config.lmoWarmStart && data.lmo !== nothing
