@@ -21,7 +21,8 @@ function setupLMO!(
             SCIP.@SCIP_CALL SCIP.SCIPlpiFree(oldLpiRef)
         end
 
-        data.lmo = buildLPILMO(scip, lp.lpCols, lp.lpRows, lp.colDict, activeGIntIdx, config.norm, stage, lp.ncols, lp.nrows, config.verbose)
+        data.lmo = buildLPILMO(scip, lp.lpCols, lp.lpRows, lp.colDict, activeGIntIdx, config.norm, stage, lp.ncols, lp.nrows, config.verbose;
+                                primal=config.lmoPrimalSimplex)
         scipLpiRef = Ref{Ptr{SCIP.SCIP_LPI}}(C_NULL)
         SCIP.@SCIP_CALL SCIP.SCIPgetLPI(scip, scipLpiRef)
 
@@ -540,16 +541,12 @@ function SCIP.find_primal_solution(
         end
         
         fwStartTime = time()
-        # Simplex counters, deadline and fallback basis exist only on the raw-LPI LMO (lmoWarmStart)
+        # Simplex counters and fallback basis exist only on the raw-LPI LMO (lmoWarmStart)
         isLPI = data.lmo isa LPILMO
         simplexItersBefore = isLPI ? data.lmo.simplexIters[] : 0
 
         # Bound the LMO's own LP solves to what's left of the budget, so a single slow LP can't run unbounded
-        if isLPI
-            data.lmo.deadline[] = time() + remainingTime
-        else
-            MOI.set(data.lmo.o, MOI.TimeLimitSec(), max(remainingTime, 1e-3))
-        end
+        data.lmo.deadline[] = time() + remainingTime
 
         local xProj, projObj, fwIters, fwGap
         deadlineExceeded = false
@@ -583,9 +580,7 @@ function SCIP.find_primal_solution(
                     end
                     stats.lockInfeasibleRetries += 1
                 elseif !isLPI
-                    # MOI-based LMO has no typed exceptions of its own; FrankWolfe.jl's MOI oracle
-                    # throws a raw MOI error when the LP terminates without a primal solution
-                    # (dual infeasible, or its own time limit). Treat that the same as LMOSolverError.
+                    # Any other error from the MOI-based LMO: treat it as a solver error.
                     solverError = true
                     break
                 else

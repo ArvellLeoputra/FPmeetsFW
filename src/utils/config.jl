@@ -3,6 +3,7 @@ const VALID_NORMS = (:euclidean, :manhattan)
 const VALID_FW_VARIANTS = (:vanilla, :away, :blended_pairwise, :blended)
 const VALID_FW_STEP_SIZES = (:agnostic, :backtracking, :secant, :adaptive, :unitary, :fixed)
 
+# Read a .cfg file into key => value pairs
 function parseCfgFile(path::String)
     if !isfile(path)
         error("Configuration file 'fpfw.cfg' not found: $path")
@@ -19,6 +20,7 @@ function parseCfgFile(path::String)
     return params
 end
 
+# Parse and validate the settings into an FPFWConfig
 function buildFPFWConfig(params::Dict{String, String})
     inputs = [
         "runName",
@@ -39,7 +41,7 @@ function buildFPFWConfig(params::Dict{String, String})
         "seed",
         "verbose"
     ]
-    
+
     for input in inputs
         if !haskey(params, input)
             error("Missing key '$input' in fpfw.cfg or CLI args")
@@ -72,6 +74,8 @@ function buildFPFWConfig(params::Dict{String, String})
     lmoWarmStart = parse(Bool, params["lmoWarmStart"])
     useDive = parse(Bool, params["useDive"])
     exactCycleCheck = parse(Bool, get(params, "exactCycleCheck", "true"))
+    lmoSimplex = get(params, "lmoSimplex", "dual")
+    lmoSimplex in ("dual", "primal") || error("lmoSimplex must be dual or primal, got $lmoSimplex")
     presolve = parse(Bool, params["presolve"])
     seed = parse(Int, params["seed"])
     verbose = parse(Int, params["verbose"])
@@ -201,12 +205,14 @@ function buildFPFWConfig(params::Dict{String, String})
         lmoWarmStart = lmoWarmStart,
         useDive = useDive,
         exactCycleCheck = exactCycleCheck,
+        lmoPrimalSimplex = lmoSimplex == "primal",
         presolve = presolve,
         seed = seed,
         verbose = verbose,
     )
 end
 
+# Read the CLI args: MPS file, optional .cfg (default settings/fpfw.cfg), then key=value overrides
 function loadConfig(args::Vector{String})
     if length(args) < 1
         error("Usage: julia main.jl <mps_file> [key=value ...]")
@@ -221,7 +227,7 @@ function loadConfig(args::Vector{String})
     # Load configuration file
     settingsDir = joinpath(@__DIR__, "..", "..", "settings")
     cliArgsIdx = 2
-    
+
     if length(args) >= 2 && !contains(args[2], "=")
         cfgArg = args[2]
         if isfile(cfgArg)  # absolute path

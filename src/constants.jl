@@ -11,7 +11,7 @@ const DEF_GRAD_FLIP_TOL = 1e-3
 # SCIP's own limits/time, set effectively unbounded so it never cuts the solve off early
 const DEF_SCIP_TIME_LIMIT = 1000000
 
-# MIPLIB .solu file: instance -> known optimal/best-known objective, 
+# MIPLIB .solu file: instance -> known optimal/best-known objective,
 # Source: https://miplib.zib.de/downloads/miplib2017-v36.solu.
 const SOLU_FILE = joinpath(@__DIR__, "..", "data", "miplib2017-v36.solu")
 
@@ -32,13 +32,13 @@ const DEF_ALPHA_FACTOR = 0.9   # geometric decay per iteration
 const DEF_ALPHA_MIN = 1e-4     # alpha at or below this snaps to 0
 
 # FW stall-detection (inner-loop analogue of DEF_MIN_IMPROVEMENT/MAX_STAGNATION above)
-const DEF_FW_STALL_MAX_ITERS = 0  # consecutive non-improving FW steps before giving up early; 0 disables
+const DEF_FW_STALL_MAX_ITERS = 0     # consecutive non-improving FW steps before giving up early; 0 disables
 const DEF_FW_MIN_IMPROVEMENT = 0.10  # relative dual_gap improvement needed to reset the counter
 
 # Lock-eligible variables (per-variable, pump-level analogue of the stall-detection pair above)
-const DEF_FW_LOCK_THRESHOLD = 0  # consecutive stable pump iterations before a variable's LMO bounds get locked; 0 disables
+const DEF_FW_LOCK_THRESHOLD = 0   # consecutive stable pump iterations before a variable's LMO bounds get locked; 0 disables
 const DEF_FW_LOCK_MAX_FRAC = 0.1  # max fraction of ncols newly locked per pump iteration
-const DEF_FW_LOCK_CAP = 100  # absolute ceiling on new locks per iteration, regardless of ncols
+const DEF_FW_LOCK_CAP = 100       # absolute ceiling on new locks per iteration, regardless of ncols
 
 # Staging parameters
 const DEF_STAGE1_MAX_ITER = 10000

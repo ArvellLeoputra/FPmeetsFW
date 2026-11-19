@@ -1,4 +1,4 @@
-# Rounding threshold generator (from Bertacco et al., 2007)
+# Rounding threshold generator
 function getRoundingThreshold(random::Bool)
     if !random
         return 0.5

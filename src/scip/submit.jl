@@ -1,8 +1,6 @@
-# Fix integer variables to xRound and solve the LP to adjust continuous variables
-# Fallback when xRound alone is not accepted as a feasible MIP solution.
-# `remainingTime` (seconds) bounds the dive LP: SCIPsolveDiveLP has no time argument, so we
-# temporarily tighten `limits/time` (the diving solve derives its deadline from it) and restore
-# it afterwards. A timed-out dive returns solstat != OPTIMAL, handled by the non-OPTIMAL branch.
+# Fallback when xRound is not feasible:
+# fix the integers to xRound and solve the LP for the continuous ones.
+# The dive LP has no time argument, so limits/time is lowered to remainingTime and restored afterwards.
 function diveSolve(
     scip::Ptr{SCIP.SCIP_},
     lpCols::Vector{Ptr{SCIP.SCIP_COL}},

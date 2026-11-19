@@ -5,11 +5,12 @@ function buildLPILMO(
     lpRows::Vector{Ptr{SCIP.SCIP_ROW}},
     colDict::Dict{Ptr{SCIP.SCIP_COL}, Int},
     gIntIdx::Vector{Int},
-    norm::Symbol,  # only :manhattan gets the auxiliary block
+    norm::Symbol,
     stage::Int,
     ncols::Int32,
     nrows::Int32,
-    verbose::Int
+    verbose::Int;
+    primal::Bool = false
 )
     # Create SCIPlpi instance
     lpiPtr = Ref{Ptr{SCIP.SCIP_LPI}}(C_NULL)
@@ -17,11 +18,12 @@ function buildLPILMO(
     SCIP.@SCIP_CALL SCIP.SCIPlpiCreate(lpiPtr, msghdlr, "lmo", SCIP.SCIP_OBJSEN_MINIMIZE)
     lpi = lpiPtr[]
 
-    obj = zeros(Cdouble, ncols)  # later set to the current gradient direction in compute_extreme_point
+    obj = zeros(Cdouble, ncols)
     lb = zeros(Cdouble, ncols)
     ub = zeros(Cdouble, ncols)
     inf = SCIP.SCIPlpiInfinity(lpi)
 
+    # Extract the variable bounds
     for j in 1:ncols
         col = lpCols[j]
         var = SCIP.SCIPcolGetVar(col)
@@ -29,7 +31,7 @@ function buildLPILMO(
         ub[j] = min(SCIP.SCIPvarGetUbLocal(var), inf)
     end
 
-    # Add columns
+    # Add columns to the LPI
     SCIP.@SCIP_CALL SCIP.SCIPlpiAddCols(
         lpi,
         Cint(ncols),
@@ -50,6 +52,7 @@ function buildLPILMO(
     nonzVals = Float64[]
     offset = Cint(0)
 
+    # Copy the rows in sparse format
     for i in 1:nrows
         row = lpRows[i]
         constant = SCIP.SCIProwGetConstant(row)
@@ -71,7 +74,7 @@ function buildLPILMO(
         end
     end
 
-    # Add rows
+    # Add rows to the LPI
     SCIP.@SCIP_CALL SCIP.SCIPlpiAddRows(
         lpi,
         nrows,
@@ -90,7 +93,7 @@ function buildLPILMO(
         auxObj = ones(Cdouble, nGInt)
         auxLb = zeros(Cdouble, nGInt)
         auxUb = fill(SCIP.SCIPlpiInfinity(lpi), nGInt)
-        
+
         SCIP.@SCIP_CALL SCIP.SCIPlpiAddCols(
             lpi,
             Cint(nGInt),
@@ -115,7 +118,7 @@ function buildLPILMO(
             auxCol = Cint(ncols + k - 1)  # 0-based: aux columns follow the original ncols
             xCol = Cint(i - 1)
 
-            # Add the first row for the absolute value constraint: aux_k - x_i >= 0
+            # Row 1: aux_k - x_i >= -xRound_i, i.e. aux_k >= x_i - xRound_i
             push!(auxLhs, 0.0)
             push!(auxRhs, inf)
             push!(auxBeg, auxOffset)
@@ -125,7 +128,7 @@ function buildLPILMO(
             push!(auxNonzVals, -1.0)
             auxOffset += 2
 
-            # Add the second row for the absolute value constraint: aux_k + x_i >= 0
+            # Row 2: aux_k + x_i >= xRound_i, i.e. aux_k >= xRound_i - x_i
             push!(auxLhs, 0.0)
             push!(auxRhs, inf)
             push!(auxBeg, auxOffset)
@@ -136,6 +139,7 @@ function buildLPILMO(
             auxOffset += 2
         end
 
+        # Add the auxiliary rows to the LPI
         SCIP.@SCIP_CALL SCIP.SCIPlpiAddRows(
             lpi,
             Cint(2 * nGInt),
@@ -176,6 +180,7 @@ function buildLPILMO(
         origUb=copy(ub),
         verbose,
         deadline=Ref(Inf),
+        primal,
         simplexIters=Ref(0),
         fallbackCstat=Ref(Cint[]),
         fallbackRstat=Ref(Cint[])
@@ -219,8 +224,7 @@ function LPIcheckFeasible!(lmo::LPILMO)::Bool
     lpTimeLeft = min(DEF_SCIP_TIME_LIMIT, max(1e-3, lmo.deadline[] - time()))
     SCIP.@SCIP_CALL SCIP.SCIPlpiSetRealpar(lmo.lpi, SCIP.SCIP_LPPAR_LPTILIM, lpTimeLeft)
 
-    # Checked by hand, not @SCIP_CALL, so a genuine solver glitch (SCIP_LPERROR) is catchable
-    # instead of crashing the whole run — same reasoning as compute_extreme_point.
+    # Checked manually so SCIP_LPERROR becomes a catchable error instead of a crash
     retcode = SCIP.SCIPlpiSolveDual(lmo.lpi)
     if retcode == SCIP.SCIP_LPERROR
         throw(LMOSolverError())
@@ -282,7 +286,7 @@ function LPIinitBaseFrom(lmo::LPILMO, cstatSrc::Vector{Cint}, rstatSrc::Vector{C
     rstat = ones(Cint, lmo.nrows)
     rstat[1:nrows] .= @view rstatSrc[1:nrows]
     LPIsetBase(lmo, cstat, rstat)
-    
+
     # Track the basis to fallback in case of infeasibility in the LMO's LPI after locking variables
     lmo.fallbackCstat[] = cstat
     lmo.fallbackRstat[] = rstat
@@ -306,14 +310,12 @@ function FrankWolfe.compute_extreme_point(lmo::LPILMO, direction::AbstractVector
     lpTimeLeft = min(DEF_SCIP_TIME_LIMIT, max(1e-3, lmo.deadline[] - time()))
     SCIP.@SCIP_CALL SCIP.SCIPlpiSetRealpar(lmo.lpi, SCIP.SCIP_LPPAR_LPTILIM, lpTimeLeft)
 
-    # Solve with dual simplex. Checked by hand (not @SCIP_CALL) so a genuine solver glitch
-    # (SCIP_LPERROR — numerical failure, distinct from infeasible or timed-out) can be turned
-    # into a catchable exception instead of crashing the whole run.
-    retcode = SCIP.SCIPlpiSolveDual(lmo.lpi)
+    # Solve with the dual or primal simplex. Checked manually so SCIP_LPERROR becomes a catchable error instead of a crash
+    retcode = lmo.primal ? SCIP.SCIPlpiSolvePrimal(lmo.lpi) : SCIP.SCIPlpiSolveDual(lmo.lpi)
     if retcode == SCIP.SCIP_LPERROR
         throw(LMOSolverError())
     elseif retcode != SCIP.SCIP_OKAY
-        error("SCIP.SCIPlpiSolveDual(lmo.lpi) yielded SCIP code $retcode")
+        error("SCIP LPI solve yielded SCIP code $retcode")
     end
 
     # Check if time limit was reached

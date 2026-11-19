@@ -61,6 +61,8 @@ The fields can be set via a configuration file or command-line arguments.
     fwAsrShakes::Int = 0
     "use the raw SCIP-LPI LMO and seed its basis from SCIP's LP basis (vs the MOI-based LMO)"
     lmoWarmStart::Bool = true
+    "simplex for the warm-started LMO solves: dual or primal"
+    lmoPrimalSimplex::Bool = false
     "stop a FW projection early after this many non-improving dual_gap steps in a row; 0 disables"
     fwStallMaxIters::Int = DEF_FW_STALL_MAX_ITERS
     "relative dual_gap improvement needed to reset fwStallMaxIters's counter"
@@ -161,6 +163,18 @@ Used for logging and reporting purposes.
 end
 
 """
+MOILMO
+Wraps FrankWolfe's MathOptLMO (used when lmoWarmStart=false) with a deadline, so every LP solve
+gets only the time that is left, not the time left when the FW call started.
+"""
+struct MOILMO <: FrankWolfe.LinearMinimizationOracle
+    "the MOI-based oracle (fresh SCIP model)"
+    inner::FrankWolfe.MathOptLMO
+    "deadline to stop the current LP solve"
+    deadline::Base.RefValue{Float64}
+end
+
+"""
 LPILMO
 A struct that implements a linear minimization oracle (LMO) for the 
 Frank-Wolfe algorithm using SCIP's LPI interface.
@@ -179,7 +193,9 @@ Frank-Wolfe algorithm using SCIP's LPI interface.
     verbose::Int
     "deadline to stop the current LP solve"
     deadline::Base.RefValue{Float64}
-    "cumulative dual-simplex iterations"
+    "solve the projection LPs with the primal simplex instead of the dual"
+    primal::Bool = false
+    "cumulative simplex iterations"
     simplexIters::Base.RefValue{Int}
     "most recent viable basis seen right after a real solve with no locks active"
     fallbackCstat::Base.RefValue{Vector{Cint}}
@@ -290,8 +306,8 @@ A struct that holds the runtime data for a run of the FPFW heuristic.
 @kwdef mutable struct FPFWRunData
     "number of times SCIP has invoked the heuristic"
     called::Int64 = 0
-    "the Frank-Wolfe linear minimization oracle: MathOptLMO (MOI-based) or LPILMO (raw SCIP-LPI)"
-    lmo::Union{Nothing, FrankWolfe.MathOptLMO, LPILMO} = nothing
+    "the Frank-Wolfe linear minimization oracle: MOILMO (MOI-based) or LPILMO (raw SCIP-LPI)"
+    lmo::Union{Nothing, MOILMO, LPILMO} = nothing
     "run statistics, filled during the run and read out afterwards for reporting"
     stats::FPFWStats = FPFWStats()
     "restart's general-integer flip budget: escalates across consecutive restarts, decays

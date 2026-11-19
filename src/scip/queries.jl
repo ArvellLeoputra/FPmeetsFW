@@ -24,7 +24,7 @@ function getLPInfo(scip::Ptr{SCIP.SCIP_})
         elseif !isFixed && SCIP.SCIPvarGetType(var) == SCIP.SCIP_VARTYPE_INTEGER
             push!(gIntIdx, j)
         end
-        
+
         initSol[j] = SCIP.SCIPcolGetPrimsol(lpCols[j])
     end
 
@@ -89,7 +89,7 @@ function isSolutionLPFeasible(
         constant = SCIP.SCIProwGetConstant(row)
         lhs = SCIP.SCIProwGetLhs(row) - constant
         rhs = SCIP.SCIProwGetRhs(row) - constant
-        
+
         belowLhs = lhs > -inf && SCIP.SCIPisFeasLT(scip, activity, lhs) == SCIP.TRUE
         aboveRhs = rhs < inf && SCIP.SCIPisFeasGT(scip, activity, rhs) == SCIP.TRUE
 
@@ -105,16 +105,6 @@ end
 function isSolutionIntegral(scip::Ptr{SCIP.SCIP_}, sol::Vector{Float64}, intIdx::Vector{Int})
     for i in intIdx
         if !isVarInteger(scip, sol[i])
-            return false
-        end
-    end
-    return true
-end
-
-# Currently unused
-function areSolutionsEqual(scip::Ptr{SCIP.SCIP_}, intIdx::Vector{Int}, x1::Vector{Float64}, x2::Vector{Float64})
-    for i in intIdx
-        if SCIP.SCIPisEQ(scip, x1[i], x2[i]) == SCIP.FALSE
             return false
         end
     end
